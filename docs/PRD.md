@@ -74,7 +74,7 @@ Priority: **P0** ships in v1.0. **P1** ships in v1.x. **P2** is on the roadmap.
 
 - **Sign in with GitHub** via the device flow of a GitHub App registered by the project. The plugin shows an eight-character code and a button that opens github.com. The user approves, chooses which repositories the app may access, and returns. No token is created or pasted. The app requests only *Contents: read and write* and *Metadata: read*, so it can never touch repositories the user did not select. The client ID is public by design; there is no client secret.
 - **Personal access token fallback** for GitHub Enterprise Server (where the project's app does not exist) and for users whose organization blocks third-party apps. The settings page links directly to the fine-grained token page with the correct permission preselected.
-- **Choose a repository**: either *Create a private repository for this vault* (named after the vault, created in one click) or *Use an existing repository* (picker listing repos the account can write to, with a private padlock indicator). An empty repository is bootstrapped automatically with an initial commit.
+- **Choose a repository**: either *Create a private repository for this vault* (named after the vault, created in one click; whether a GitHub App user token can do this, and how the new repository joins the app installation, is a spike with a fallback of sending the user to github.com to create it) or *Use an existing repository* (picker listing repos the account can write to, with a private padlock indicator). An empty repository is bootstrapped automatically with an initial commit.
 - **Choose a branch**, defaulting to the repository's default branch. Never assume `main`.
 - **First-sync preview** whenever the plugin has no sync record for the current repository and branch, and both the vault and the repository have content. This covers first setup, migrating from another plugin, switching repository or branch, and enabling a config category. The preview is read-only: it fetches the repository tree and hashes local files, but writes nothing until the user confirms.
   - Every file is classified as *identical* (adopted silently), *only in vault* (will upload), *only in repository* (will download), *different on both sides* (needs a decision), or *skipped* (over the size limit).
@@ -92,14 +92,15 @@ Priority: **P0** ships in v1.0. **P1** ships in v1.x. **P2** is on the roadmap.
 - **Automatic triggers, on by default**:
   - after the user stops editing, once no file has changed for a settle period (default 15 seconds, adjustable), so a writing session produces a handful of versions rather than one per keystroke,
   - on app launch and when the app returns to the foreground,
-  - when the app goes to the background.
+  - when the app goes to the background,
+  - while the app is in the foreground, a check for new remote commits every 30 seconds. The check is a single conditional request that is free against the API quota when nothing changed, and a pull follows only when something did.
 - **Periodic timer** as an optional safety net, off by default, minimum five minutes on mobile.
 - **Manual sync** from the ribbon, the command palette, and the status indicator.
 - **Offline awareness**: when the device is offline, automatic sync is skipped silently and the status shows offline. No error notices.
 - **Deletions and renames** propagate in both directions. A rename is a delete plus an add. A file deleted on one device is deleted on others through Obsidian's own file manager, which honors the user's *Deleted files* setting (system trash, vault `.trash` folder, or permanent). The `.trash` folder is never synced. Users who chose permanent deletion still have version history as the safety net.
 - **No empty commits.** A sync with nothing to push creates no commit.
 - **Concurrent edits from another device** during a push are detected and retried against the new remote state. The retry never turns a local change into a download.
-- **Baseline integrity**: the record of what was last synced is updated only after the remote confirms the commit, is keyed to repository, branch, and commit, and is discarded if any of those change. Changing an ignore rule never deletes files.
+- **Baseline integrity**: the record of what was last synced is updated only after the remote confirms the commit, and records the remote commit it corresponds to. It is discarded when the repository or branch changes, so a stale record can never be read against a different repository. Changing an ignore rule never deletes files.
 
 **Acceptance**: edit a note on the phone, switch to the desktop, and the change is there before you open the note. Delete a note on the desktop, it is in the phone's trash after the next sync. A `.mov` recorded on the phone arrives on the desktop byte-identical.
 
@@ -146,7 +147,7 @@ Priority: **P0** ships in v1.0. **P1** ships in v1.x. **P2** is on the roadmap.
 - **Last synced from** appears in the status tooltip and in conflict dialogs.
 - **Forget a device** removes it from the list.
 
-Implemented as small manifest files in the repository, so it costs no extra service.
+Implemented as small manifest files stored in the repository outside the synced branch, so they never appear in the vault's history, never create commits on the branch, and cost no extra service.
 
 ### 5.7 Large files (P0)
 
@@ -202,6 +203,7 @@ Implemented as small manifest files in the repository, so it costs no extra serv
 - **Android heap**: assume about 45 MB available. All file I/O uses chunked read and append APIs available since Obsidian 1.12.
 - **Minimum Obsidian version**: 1.13, for chunked binary APIs.
 - **Community plugin guidelines**: no default hotkeys, no network calls before the user signs in, no telemetry.
+- **Per-file request cost.** Every file uploaded or downloaded through the Git Data API is one request, against a quota of 5,000 per hour. A first sync of a very large vault can therefore take hours in each direction. The design should batch text files where the API allows it and use a bulk download path for first sync where one is available; both are spikes.
 - **Repository growth.** Every sync that pushes changes creates one commit; pulls create none. GitHub recommends keeping repositories under 1 GB and may intervene above 5 GB. Text edits are cheap: GitHub stores versions of a note as compressed deltas, so even hundreds of commits a day add well under a megabyte. Attachments are the real cost: each edited version of an image or PDF is stored in full. Design consequences: the settle period coalesces edits, no commit is made when nothing changed, the status card shows repository size, and a warning appears when the repository passes 1 GB. A history-compaction tool (rewrite history older than N months) is a P2 candidate.
 
 ## 8. Success measures
