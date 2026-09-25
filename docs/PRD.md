@@ -50,13 +50,13 @@ This plugin exists to be the option that gets those three things right, and to a
 - Desktop (Windows, macOS, Linux), iOS, Android
 - One vault per repository, synced to the repository root
 - Text notes, attachments, and opt-in Obsidian config categories
-- Files up to GitHub's 100 MB blob limit
+- Files up to GitHub's 100 MB blob limit on desktop; uploads from mobile are capped at 20 MB in v1.0 and queued for the next desktop sync (see 5.7)
 
 ### Explicit non-goals for v1
 
 - End-to-end encryption of vault contents
 - Whole-vault rollback to a point in time
-- Git LFS or files above 100 MB
+- Files above 100 MB
 - Syncing to a subfolder, or several vaults in one repo
 - GitLab, Gitea, Bitbucket, or self-hosted Git servers
 - Real-time collaboration, presence, or locking
@@ -151,7 +151,8 @@ Implemented as small manifest files stored in the repository outside the synced 
 
 ### 5.7 Large files (P0)
 
-- Files are transferred in chunks so that peak memory is bounded by the chunk size, not the file size, on every platform.
+- Downloads are streamed to disk so that peak memory is bounded by the chunk size, not the file size, on every platform.
+- Uploads through the Git Data API must be sent whole. On mobile, files above 20 MB are not uploaded; they are listed as *waiting for desktop* and uploaded by the next desktop sync. Desktop uploads up to the 100 MB blob limit.
 - Files above GitHub's 100 MB blob limit are skipped and listed by name in a *Skipped files* section of settings with the reason. The user is told once per file, not on every sync.
 - Local hashing of unchanged files is skipped using modification time and size, so a sync of a large vault with one changed note takes seconds.
 
@@ -199,6 +200,7 @@ Implemented as small manifest files stored in the repository outside the synced 
 
 - **GitHub API quota**: 5,000 requests per hour per user. Each changed file costs one request plus a fixed cost per sync. Debounced sync must batch edits and the timer must have a floor. Rate-limit responses must be recognized and shown as such, not as authentication errors.
 - **Tree limit**: repositories above 100,000 files or 7 MB of tree data cannot be read in one call. v1 refuses to sync such repositories with a clear message.
+- **Scale targets (provisional until the scale spike runs)**: excellent up to 10,000 files and 1 GB, with a one-note sync under five seconds on a phone; works up to 50,000 files and 5 GB with a first sync that may take hours and says so; refused beyond the tree limit. Anchors: Obsidian Sync Standard allows 1 GB and 5 MB per file, Plus allows 10 GB and 200 MB per file; forum reports put large personal vaults at 7,000 to 10,000 notes.
 - **Blob limit**: 100 MB per file.
 - **Android heap**: assume about 45 MB available. All file I/O uses chunked read and append APIs available since Obsidian 1.12.
 - **Minimum Obsidian version**: 1.13, for chunked binary APIs.
@@ -220,9 +222,11 @@ Quality is measured before growth.
 
 **v1.0**: sections 5.1, 5.2, 5.3 (defaults, never-list, categories, ignore file), 5.4 (merge, picker, keep both, visibility), 5.5 (history, preview, restore), 5.7, 5.8, 5.9.
 
+**v1.1**: Git LFS for attachments above a size threshold, including the mobile large-upload path (see 5.7 and the LFS spike). GitHub's free tier now includes 10 GB of LFS storage and bandwidth per month.
+
 **v1.x**: context-menu exclude and sync-this-file, expandable diff, deleted-file recovery, devices list.
 
-**Later, if demand appears**: whole-vault rollback, Git LFS, GitLab and Gitea, repository subfolders, encryption.
+**Later, if demand appears**: whole-vault rollback, GitLab and Gitea, repository subfolders, encryption.
 
 ## 10. Decisions log
 
@@ -232,6 +236,8 @@ Resolved during PRD review on 2026-09-25:
 - **Merge reversibility**: no separate undo mechanism. Each automatic merge keeps a 30-day local snapshot of the pre-merge version and surfaces both inputs in file history. See 5.4.
 - **Config sync policy**: on by default for all categories, since settings are reproducible. Plugins whose settings contain credentials are excluded by default with per-plugin opt-in. Config conflicts are resolved by a bulk rule on enable and by newest-wins afterwards, never by a per-file picker. See 5.3.
 - **Sync frequency and repository size**: the settle period coalesces edits into one commit per writing pause; text history is cheap, attachment history is not. See section 7.
+- **Large uploads**: Git Data API uploads cannot be chunked, so v1.0 caps mobile uploads at 20 MB and queues the rest for desktop. Git LFS is P1 for v1.1 as the large-attachment path; a Blob-bodied upload spike decides whether the mobile cap can be removed entirely.
+- **Scale targets**: provisional numbers in section 7, to be replaced by the scale spike's results.
 - **Name**: Vaultline, plugin id `vaultline`. Store description leads with "Sync your vault across desktop and mobile through your own private GitHub repository." Chosen 2026-09-25.
 - **Deletions**: go through Obsidian's file manager and honor the user's *Deleted files* setting. See 5.2.
 
