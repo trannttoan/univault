@@ -100,19 +100,19 @@ Relationships: SyncAnchor is the parent of every IndexEntry. A PendingConflict r
 
 ## Cross-Cutting Rules
 
-- **Auth propagation.** The GitHub client is the only module that sees tokens. It refreshes on 401 once, then surfaces `auth-expired`. Tokens never appear in logs, errors, URLs, or the sync log; the client redacts any header value before an error is constructed.
+- **Auth propagation.** Tokens are handled only by the session module (device flow, refresh, PAT entry) and the GitHub client; no other module receives one. It refreshes on 401 once, then surfaces `auth-expired`. Tokens never appear in logs, errors, URLs, or the sync log; the client redacts any header value before an error is constructed.
 - **Errors.** One `UnivaultError` type with a closed `code` set (`offline | rate-limited | auth-expired | forbidden | not-found | conflict-retry | tree-too-large | path-unsafe | storage-full | unknown`) and an optional cause. Modules throw codes; only the UI maps codes to strings. Nothing matches on message text.
 - **Rate limits.** 403 or 429 with rate-limit headers is `rate-limited`, never `auth-expired`. The orchestrator pauses automatic syncs until the reset time and shows it.
 - **Retries.** Idempotent reads retry three times with exponential backoff starting at one second. Writes are not retried blindly; a rejected ref update triggers one re-sync cycle, at most three per trigger.
 - **Conditional requests.** Every GET stores its ETag and sends `If-None-Match`. The foreground poll relies on 304 being free.
-- **Memory.** No module may hold more than one file's worth of bytes at a time, and on mobile no single allocation may exceed the upload cap. Downloads stream. Hashing of large files is incremental. The remote tree, when a full read is unavoidable, is parsed once and discarded.
+- **Memory.** A byte budget bounds transient bytes in flight (16 MB on mobile, 256 MB on desktop). A small scheduler admits work by declared size, so many small transfers run concurrently while a large one runs alone. Large payloads leave the heap through streams or Blob-backed bodies; a code path that can only take a heap buffer (the Git blob upload endpoint) is subject to the platform cap. Downloads stream. Hashing of large files is incremental. The remote tree, when a full read is unavoidable, is parsed once and discarded.
 - **Paths.** Every path from the repository is canonicalized (backslashes to slashes, collapse duplicate slashes, NFC) and rejected if it contains `.` or `..` segments, is absolute, begins with the config directory in any letter case, or targets the plugin's own folder. Every path from the vault is NFC-normalized before comparison.
-- **Text vs binary.** Decided by content (strict UTF-8, no NUL), never by extension. Bytes are stored exactly as read; no line-ending normalization. The merge engine treats `\r\n` and `\n` as line terminators.
+- **Text vs binary.** Decided by content (strict UTF-8, no NUL). A known binary extension may short-circuit to binary to avoid sniffing large media; nothing is ever classified as text by extension. Bytes are stored exactly as read; no line-ending normalization. The merge engine treats `\r\n` and `\n` as line terminators.
 - **Atomic writes.** Downloads land in a temporary file beside the target and are renamed into place. A crash mid-download never leaves a truncated note.
 - **Deletions.** Always through Obsidian's file manager so the user's *Deleted files* preference applies.
 - **Logging.** A ring buffer in IndexedDB, not the console, with a "copy log" action. Console output only in a debug preference. Every entry redacts tokens and truncates paths to the vault-relative form.
 - **Config.** Preferences in the plugin settings file, per-device state in IndexedDB with a schema version and forward-only migrations. The plugin refuses to run against a newer schema than it knows.
-- **Concurrency.** One sync at a time per vault, enforced by the orchestrator, not by callers.
+- **Concurrency.** One sync at a time per vault, enforced by the orchestrator, not by callers. Within a sync, transfers and hashing run concurrently under the byte budget.
 - **Time.** All timestamps UTC ISO 8601. Device names are user-facing; device ids are UUIDs generated on install.
 
 ## Non-Functional Requirements
@@ -120,7 +120,7 @@ Relationships: SyncAnchor is the parent of every IndexEntry. A PendingConflict r
 - **Scale (provisional, spike S1 confirms):** excellent to 10,000 files and 1 GB, working to 50,000 files and 5 GB, refused beyond the recursive tree limit (100,000 entries or 7 MB).
 - **Incremental sync cost:** a one-note change on a 10,000-file vault completes in under five seconds on a low-end Android phone, and an unchanged remote costs zero quota.
 - **Propagation:** a change on one device is visible on another foregrounded device within 30 seconds on Wi-Fi.
-- **Memory:** peak JavaScript heap during any download is bounded by the chunk size plus fixed overhead; during any upload by the platform cap (20 MB on mobile, 100 MB on desktop) times 1.4.
+- **Memory:** transient bytes in flight never exceed the byte budget (16 MB on mobile, 256 MB on desktop). Downloads cost one chunk each regardless of file size. A Git blob upload costs about 1.4 times the file and therefore runs alone and is capped at 20 MB on mobile and 100 MB on desktop.
 - **Offline:** every automatic trigger checks connectivity first and exits silently when offline. Manual sync while offline reports `offline` once. Conflicts and queued uploads persist across restarts and offline periods.
 - **Quota:** a steady-state heavy user (one sync every 15 seconds of pausing, ten changed files each) stays under 500 requests per hour.
 - **Durability:** the anchor and index advance only after the ref update succeeds. A crash at any phase boundary leaves the vault and the index in a state the next sync resolves without loss.
