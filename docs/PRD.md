@@ -182,19 +182,95 @@ Implemented as small manifest files stored in the repository outside the synced 
 
 ## 6. What sets it apart
 
-| | This plugin | obsidian-git | Gitless Sync | Git Vault Sync | SyncGit |
-|---|---|---|---|---|---|
-| Works on mobile with large vaults | Yes, chunked | No | Crashes | Crashes reported | 25 MB cap |
-| Sign in without a token | Yes | No | No | No | No |
-| Access limited to the chosen repositories | Yes (GitHub App) | Token grants all repos | Token grants all repos | Token grants all repos | Token grants all repos |
-| Auto-merge same-note edits | Yes | Desktop only | No | Desktop only | No |
-| Never loses a conflict side | Yes | No | No | No | Yes |
-| Per-file history and restore | Yes | Desktop only | No | No | No |
-| Deletions and renames propagate | Yes | Yes | Unreliable | Yes | Yes |
-| Sync after edits | Yes | Timer | Timer | Timer | Timer |
-| Device list | Yes | No | No | No | Name only |
-| Automated tests | Yes | Yes | No | Partial | No |
-| Maintained | New | Yes | No | Yes | Dormant |
+This section is the source for the store listing and README. Every line is a user-visible outcome, tagged with the release that ships it and whether any existing plugin offers it. "Unique" means no plugin in the community store does this as of September 2026; "done right" means competitors attempt it and have open data-loss or reliability issues.
+
+### Comparison
+
+| | Univault | obsidian-git | Gitless Sync | Git Vault Sync | SyncGit | Hybrid Git Sync |
+|---|---|---|---|---|---|---|
+| Sign in without creating a token | Yes | No | No | No | No | No |
+| Access limited to the repositories you choose | Yes (GitHub App) | Token grants all | Token grants all | Token grants all | Token grants all | Token grants all |
+| Works on mobile with large vaults | Yes, streamed | No, documented | Crashes | Crashes reported | 25 MB cap | Large files fail |
+| Auto-merge same-note edits | Yes, all platforms | Desktop only | No | Desktop only | No | Desktop only |
+| Never loses a conflict side | Yes | No | No | No | Yes | Unknown |
+| Every automatic merge is reversible | Yes | No | No | No | No | No |
+| Conflicts never block other files | Yes | No | No | No | Yes | Unknown |
+| Deletions and renames propagate reliably | Yes | Yes | Unreliable | Yes | Yes | Yes |
+| Sync shortly after you stop typing | Yes | Timer | Timer | Timer | Timer | Timer |
+| Free-of-quota polling while foregrounded | Yes | n/a | No | No | No | No |
+| Per-note history, preview, restore in-app | Yes | Desktop only | No | No | No | No |
+| First-sync preview before anything is written | Yes | No | No | No | No | No |
+| Empty repository bootstrapped automatically | Yes | No | No | No | Yes | No |
+| Config sync with credential detection | Yes | Config sync only | Config sync only | No | No | No |
+| Mobile status surface with copyable errors | Yes | Partial | Log file | No | Log modal | Unknown |
+| Device list with last sync per device | v1.x | No | No | No | Name only | No |
+| Large attachments through LFS, mobile included | v1.1 | Desktop only | No | No | No | Requested |
+| Repository is a plain copy of the vault | Yes | Yes | Yes | Yes | Yes | Yes |
+| Automated tests for every guarantee | Yes | Partial | No | Partial | No | Unknown |
+
+### Distinguishing features, by what the user notices
+
+**Setup**
+
+- Sign in with GitHub in under a minute: a code, one approval on github.com, done. No token to create, scope, copy, or paste. *Unique. v1.0.*
+- The plugin can only reach the repositories you selected during sign-in, never your other private repositories. *Unique. v1.0.*
+- Create a private repository for the vault from inside the plugin, or pick an existing one from a list. An empty repository is initialized for you. *Repository creation unique; bootstrap done right. v1.0.*
+- A preview before the first sync of a populated vault: what will download, what will upload, what differs, with a bulk rule you choose. Cancel writes nothing. *Unique. v1.0.*
+- A setup checklist that shows what is left and takes you to it. *Unique. v1.0.*
+- Token sign-in still available for GitHub Enterprise Server and locked-down organizations. *v1.0.*
+
+**Everyday sync**
+
+- Sync happens a few seconds after you stop typing, when you open the app, when you return to it, and when you leave it. You rarely press a button. *Unique among Git-based plugins. v1.0.*
+- Another open device sees your change within 30 seconds, and the check that makes this possible costs nothing against GitHub's API quota. *Unique. v1.0.*
+- Offline is silent. No error toasts on a plane. *Done right. v1.0.*
+- No empty commits, ever. *Done right. v1.0.*
+- Deletions arrive in the other device's trash, respecting its own trash setting. Renames arrive as renames and keep their history. *Done right. v1.0.*
+- Shared ignore rules: exclude a folder once and every device honors it, without deleting anything. *Done right. v1.0.*
+- Your settings, theme, hotkeys, and plugins follow you to a new device by default. Plugin settings that contain credentials stay on the device unless you opt them in. *Credential detection unique. v1.0.*
+
+**Conflicts**
+
+- Two devices editing different parts of the same note merge automatically, on phones too. *Mobile merge unique. v1.0.*
+- Two devices editing the same paragraph produce one prompt: keep mine, keep theirs, keep both. Two taps. *v1.0.*
+- Keep both, and dismissing the prompt, save the other version as a sibling file named after the device and time. Nothing is ever discarded. *Done right. v1.0.*
+- A pending conflict never blocks the rest of your vault from syncing, and it survives restarts. *Done right. v1.0.*
+- Every automatic merge is reversible: your version before the merge is kept for 30 days and shown in the note's history beside the other device's version. *Unique. v1.0.*
+- An expandable diff in the prompt shows exactly what differs. *v1.x.*
+
+**Recovery**
+
+- Open any note's history from any device: every version with time and device, preview it, restore it in one tap. *Unique among GitHub-API plugins; desktop-only in obsidian-git. v1.0.*
+- Restoring never destroys anything; it creates a new version. *v1.0.*
+- Recover a deleted note from a list of recent deletions. *v1.x.*
+
+**Mobile**
+
+- Vaults with gigabytes of attachments sync on a low-end phone. Downloads stream to disk in small pieces, so memory never depends on file size. *Unique. v1.0.*
+- Files too large to upload from a phone are queued and uploaded by your desktop, and the phone tells you which ones. *Unique. v1.0.*
+- Everything the desktop status bar shows has a home on the phone: last sync, pending conflicts, skipped files, repository size, and a log you can copy. *Done right. v1.0.*
+- Large attachments through Git LFS, using GitHub's 10 GB free allowance, including uploads from the phone. *Mobile LFS unique. v1.1.*
+
+**Trust and safety**
+
+- Your credential is stored on the device, outside the vault folder, and is never written into the repository. *Done right. v1.0.*
+- Files coming from the repository are validated before they touch the vault; nothing from a repository can overwrite plugin code or escape the vault folder. *Unique. v1.0.*
+- Text and binary are told apart by content, never by file extension, so a video with an unusual extension is never "normalized" into garbage. *Done right. v1.0.*
+- Rate limits are reported as rate limits, with the time they lift, never as "your token is invalid." *Done right. v1.0.*
+- No server, no telemetry, no account other than GitHub. The plugin runs nothing but an app registration. *v1.0.*
+- Every guarantee above has an automated test that runs on every change. *v1.0.*
+
+**Transparency**
+
+- The repository stays a plain copy of your vault. Open it on github.com, clone it with any Git client, or leave Univault behind without losing anything. *v1.0.*
+- Plugin bookkeeping never clutters your history: device information lives outside the synced branch, and merge and rename facts live in commit messages. *Unique. v1.0.*
+- See every device that syncs this vault and when it last did. *v1.x.*
+
+### What it does not try to be
+
+- It syncs with GitHub and GitHub Enterprise Server only. GitLab, Gitea, and self-hosted Git are not supported; Hybrid Git Sync and Git File Sync cover those.
+- It does not run Git commands or keep a local `.git` folder. Users who want to work on the vault from a terminal alongside the plugin should use obsidian-git on desktop.
+- It does not offer whole-vault rollback in v1, end-to-end encryption, or real-time co-editing.
 
 ## 7. Constraints the product must respect
 
