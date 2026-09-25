@@ -83,7 +83,7 @@ Priority: **P0** ships in v1.0. **P1** ships in v1.x. **P2** is on the roadmap.
   - Buttons: *Continue* and *Cancel*. Cancel leaves the vault and repository untouched.
 - **Setup checklist** at the top of settings: signed in, repository chosen, branch chosen, connection tested, first sync done. Each row is a link to fix it.
 
-**Acceptance**: a new user with an empty vault and no repository completes setup without leaving Obsidian except to approve the device code. A migrating user with a populated vault and a populated repository sees the preview and loses nothing.
+**Acceptance**: a new user with an empty vault and no repository completes setup without leaving Obsidian except to authorize on github.com. A migrating user with a populated vault and a populated repository sees the preview and loses nothing.
 
 ### 5.2 Sync engine (P0)
 
@@ -127,7 +127,7 @@ Priority: **P0** ships in v1.0. **P1** ships in v1.x. **P2** is on the roadmap.
 - **Conflicts never block other files.** Unconflicted changes sync while a conflict is pending.
 - **Pending conflicts are visible** in the status indicator and the settings page on every platform, with a *Resolve now* action. They survive app restarts.
 
-**Acceptance**: two devices append different paragraphs to the same note, sync, and both paragraphs appear on both devices with no dialog. Two devices edit the same sentence, sync, and the second device sees one dialog. Force-quitting during that dialog leaves both versions on disk.
+**Acceptance**: two devices append different paragraphs to the same note, sync, and both paragraphs appear on both devices with no dialog. Two devices edit the same sentence, sync, and the second device sees one dialog. Force-quitting during that dialog leaves both versions recoverable and the conflict still pending.
 
 ### 5.5 Version history (P0)
 
