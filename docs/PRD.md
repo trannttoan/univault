@@ -1,4 +1,4 @@
-# PRD: Vaultline
+# PRD: Univault
 
 Status: Draft v1 · 2026-09-25
 Owner: Toan Tran
@@ -238,7 +238,7 @@ Resolved during PRD review on 2026-09-25:
 - **Sync frequency and repository size**: the settle period coalesces edits into one commit per writing pause; text history is cheap, attachment history is not. See section 7.
 - **Large uploads**: Git Data API uploads cannot be chunked, so v1.0 caps mobile uploads at 20 MB and queues the rest for desktop. Git LFS is P1 for v1.1 as the large-attachment path; a Blob-bodied upload spike decides whether the mobile cap can be removed entirely.
 - **Scale targets**: provisional numbers in section 7, to be replaced by the scale spike's results.
-- **Name**: Vaultline, plugin id `vaultline`. Store description leads with "Sync your vault across desktop and mobile through your own private GitHub repository." Chosen 2026-09-25.
+- **Name**: Univault, plugin id `univault` (verified free in the community registry 2026-09-25). Store description leads with "Sync your vault across desktop and mobile through your own private GitHub repository." Vaultline was the earlier working name.
 - **Deletions**: go through Obsidian's file manager and honor the user's *Deleted files* setting. See 5.2.
 
 ## 11. Open questions
