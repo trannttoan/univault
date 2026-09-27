@@ -8,7 +8,7 @@ Creating, scoping, and pasting a personal access token is the top setup failure 
 
 ## Decision
 
-- Sign-in uses the **device flow of a GitHub App** owned by a dedicated project organization. The app is public, has no webhook, and requests only *Contents: read and write* and *Metadata: read*. The user chooses which repositories the app may access during installation.
+- Sign-in uses the **device flow of a GitHub App** named **Univault Sync** (slug `univault-sync`), owned by the dedicated `univault-app` organization. The app cannot be named "Univault" because GitHub App names may not match an account login the owner does not control, and the `univault` organization belongs to a third party. The codebase repository stays under the author's personal account; only the app registration lives in the organization, so an account problem on either side does not take down the other. The app is public, has no webhook, and requests only *Contents: read and write* and *Metadata: read*. The user chooses which repositories the app may access during installation.
 - User tokens expire after eight hours and are refreshed silently; the refresh token is the stored credential.
 - A **fine-grained personal access token** remains available for GitHub Enterprise Server and for users whose organization blocks third-party apps.
 - The client ID ships in the plugin. There is no client secret.

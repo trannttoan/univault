@@ -175,7 +175,7 @@ Implemented as small manifest files stored in the repository outside the synced 
 
 ## 5.10 Distribution and operations (P0)
 
-- **GitHub App ownership.** The app is registered under a dedicated GitHub organization for the project, not a personal account. An organization is free, survives changes to any one person's account, lets a co-maintainer be added without re-registering, and keeps the app name stable for users. The app is public so anyone can install it, has no webhook, has device flow enabled, and requests *Contents: read and write* and *Metadata: read*. User tokens expire after eight hours and are refreshed silently; the refresh token is the credential stored on the device.
+- **GitHub App ownership.** The app is named *Univault Sync* and registered under the `univault-app` organization, not a personal account. Users see "Univault Sync by univault-app" on the authorization screen. An organization is free, survives changes to any one person's account, lets a co-maintainer be added without re-registering, and keeps the app name stable for users. The app is public so anyone can install it, has no webhook, has device flow enabled, and requests *Contents: read and write* and *Metadata: read*. User tokens expire after eight hours and are refreshed silently; the refresh token is the credential stored on the device.
 - **If the app is ever unavailable**, sign-in falls back to a personal access token. Existing sessions keep working until their refresh token expires.
 - **GitHub Enterprise Server** users always use a token, since apps are registered per instance.
 - **No telemetry, no server.** The project runs nothing but the app registration.

@@ -59,7 +59,7 @@ flowchart LR
 - Hashing: WebCrypto SHA-1 for files up to the mobile cap, an incremental SHA-1 for larger files read in chunks — WebCrypto has no streaming API.
 - Data store: IndexedDB via a thin typed wrapper (no ORM) — see decision log.
 - Auth: GitHub App with device flow and refresh tokens; fine-grained personal access token as fallback — see decision log.
-- Hosting: none. One GitHub App registration under a project organization. No telemetry endpoint.
+- Hosting: none. One GitHub App registration, named **Univault Sync** (slug `univault-sync`), owned by the `univault-app` organization. The codebase stays at `github.com/trannttoan/univault`. No telemetry endpoint.
 - Minimum Obsidian version: the release that shipped ranged `readBinary` (July 2026; exact number to confirm in spike S6). `appendBinary` arrived in 1.12.3.
 
 ## Core Data Model
