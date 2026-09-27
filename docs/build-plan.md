@@ -8,9 +8,9 @@ Source documents: `docs/PRD.md`, `docs/TRD.md`, `docs/adr/`, `CLAUDE.md`.
 
 Not phases. Human-provided inputs that phases depend on.
 
-- **P-A** A public GitHub repository for the plugin, so releases can be installed through BRAT. Gates Phase 0.
+- **P-A** A public GitHub repository for the plugin, so releases can be installed through BRAT. Gates Phase 0. **Done:** `github.com/trannttoan/univault`, public, Actions enabled. The default `GITHUB_TOKEN` permission is read-only, so the release workflow declares `permissions: contents: write` itself. The plugin id `univault` was unclaimed in `obsidian-releases/community-plugins.json` on 2026-09-26.
 - **P-B** A low-end Android device with about 3 GB of RAM, plus one iOS device and one desktop, all with Obsidian installed. Gates every memory acceptance criterion from Phase 0 onward.
-- **P-C** A GitHub organization owning the Univault GitHub App: public, no webhook, device flow enabled, permissions *Contents: read and write* and *Metadata: read*. Gates Phase 4.
+- **P-C** A GitHub organization owning the Univault GitHub App: public, no webhook, device flow enabled, permissions *Contents: read and write* and *Metadata: read*. Gates Phase 4. **Done:** organization `univault-app`, app **Univault Sync** (slug `univault-sync`, client ID `Iv23liZmqSUyZ5EhTO5P`). Device flow, secret-free refresh, token lifetimes, and rotation were verified on 2026-09-26; details in ADR-006.
 
 ## Release environment
 

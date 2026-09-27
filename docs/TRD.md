@@ -59,7 +59,7 @@ flowchart LR
 - Hashing: WebCrypto SHA-1 for files up to the mobile cap, an incremental SHA-1 for larger files read in chunks — WebCrypto has no streaming API.
 - Data store: IndexedDB via a thin typed wrapper (no ORM) — see decision log.
 - Auth: GitHub App with device flow and refresh tokens; fine-grained personal access token as fallback — see decision log.
-- Hosting: none. One GitHub App registration, named **Univault Sync** (slug `univault-sync`), owned by the `univault-app` organization. The codebase stays at `github.com/trannttoan/univault`. No telemetry endpoint.
+- Hosting: none. One GitHub App registration, named **Univault Sync** (slug `univault-sync`, client ID `Iv23liZmqSUyZ5EhTO5P`), owned by the `univault-app` organization. The codebase stays at `github.com/trannttoan/univault`. No telemetry endpoint. Verified token behavior is recorded in ADR-006.
 - Minimum Obsidian version: the release that shipped ranged `readBinary` (July 2026; exact number to confirm in spike S6). `appendBinary` arrived in 1.12.3.
 
 ## Core Data Model
@@ -73,7 +73,7 @@ Device-local (IndexedDB unless noted):
 - **Snapshot** — id, path, bytes, created at, reason (`pre-merge | conflict-local`). Retained 30 days. Surfaced in file history as "this device's version".
 - **UploadQueueItem** — path, size, reason (`over-mobile-cap`). Drained by the next desktop sync.
 - **SyncLogEntry** — started at, duration, trigger, counts, error code. Ring buffer of the last 200.
-- **Session** (per-vault local storage) — host, login, access token, refresh token, expiry, auth kind (`app | pat`).
+- **Session** (per-vault local storage) — host, login, access token, access token expiry, refresh token, refresh token expiry, auth kind (`app | pat`). App access tokens live 8 hours, refresh tokens 181 days (ADR-006).
 - **Preferences** (plugin settings file) — settle period, triggers on/off, mobile upload cap, config categories, device name.
 
 In the repository:
@@ -100,7 +100,7 @@ Relationships: SyncAnchor is the parent of every IndexEntry. A PendingConflict r
 
 ## Cross-Cutting Rules
 
-- **Auth propagation.** Tokens are handled only by the session module (device flow, refresh, PAT entry) and the GitHub client; no other module receives one. It refreshes on 401 once, then surfaces `auth-expired`. Tokens never appear in logs, errors, URLs, or the sync log; the client redacts any header value before an error is constructed.
+- **Auth propagation.** Tokens are handled only by the session module (device flow, refresh, PAT entry) and the GitHub client; no other module receives one. It refreshes on 401 once, then surfaces `auth-expired`. Refresh tokens rotate, so the new access and refresh token are written to the session in one operation before the old pair is dropped. `incorrect_client_credentials` from the refresh endpoint means the refresh token was consumed or expired and maps to `auth-expired`. Tokens never appear in logs, errors, URLs, or the sync log; the client redacts any header value before an error is constructed.
 - **Errors.** One `UnivaultError` type with a closed `code` set (`offline | rate-limited | auth-expired | forbidden | not-found | conflict-retry | tree-too-large | path-unsafe | storage-full | unknown`) and an optional cause. Modules throw codes; only the UI maps codes to strings. Nothing matches on message text.
 - **Rate limits.** 403 or 429 with rate-limit headers is `rate-limited`, never `auth-expired`. The orchestrator pauses automatic syncs until the reset time and shows it.
 - **Retries.** Idempotent reads retry three times with exponential backoff starting at one second. Writes are not retried blindly; a rejected ref update triggers one re-sync cycle, at most three per trigger.
