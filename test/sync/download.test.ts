@@ -171,7 +171,7 @@ describe("download cycle", () => {
 		expect(new TextDecoder().decode(h.vault.bytes("b.md"))).toBe("b");
 	});
 
-	it("falls back to the recursive tree when compare lists when compare lists 300 files", async () => {
+	it("falls back to the recursive tree when compare lists 300 files", async () => {
 		await h.inSync({ "a.md": "a" });
 		const files = Object.fromEntries(Array.from({ length: 301 }, (_, i) => [`bulk/n${i}.md`, `note ${i}`]));
 		h.github.commitFiles(REPO, "main", files);
