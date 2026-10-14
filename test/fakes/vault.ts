@@ -60,6 +60,11 @@ export class FakeVault implements VaultLike {
 			this.files.set(newPath, this.require(path));
 			this.files.delete(path);
 		},
+		list: async (path) => {
+			const folder = path === "/" ? "" : path;
+			const inFolder = (p: string) => p !== "" && p.slice(0, Math.max(p.lastIndexOf("/"), 0)) === folder;
+			return { files: [...this.files.keys()].filter(inFolder), folders: [...this.folders].filter(inFolder) };
+		},
 		mkdir: async (path) => {
 			this.requireParent(path);
 			this.folders.add(path);

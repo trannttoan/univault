@@ -1,10 +1,10 @@
 import { UnivaultError } from "../errors";
 import type { VaultAdapter, VaultFile, VaultStat } from "./adapter";
-
-export const TEMP_SUFFIX = ".univault-partial";
+import { TEMP_SUFFIX } from "./paths";
 
 // The slice of Obsidian's Vault this adapter uses; Vault satisfies it structurally.
 export interface VaultLike {
+	configDir: string;
 	getFiles(): { path: string; stat: { mtime: number; size: number } }[];
 	adapter: {
 		exists(path: string): Promise<boolean>;
@@ -15,6 +15,7 @@ export interface VaultLike {
 		remove(path: string): Promise<void>;
 		rename(path: string, newPath: string): Promise<void>;
 		mkdir(path: string): Promise<void>;
+		list(path: string): Promise<{ files: string[]; folders: string[] }>;
 	};
 }
 
@@ -83,9 +84,20 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 		}
 	}
 
+	// Walks the disk, not the vault index, which misses temp files in dot-prefixed folders.
+	// Repository paths with the temp suffix are refused, so every match is ours.
 	async removeTempFiles(): Promise<void> {
-		for (const file of this.vault.getFiles()) {
-			if (file.path.endsWith(TEMP_SUFFIX)) await this.vault.adapter.remove(file.path);
+		const { adapter, configDir } = this.vault;
+		const pending = ["/"];
+		for (let folder = pending.pop(); folder !== undefined; folder = pending.pop()) {
+			const { files, folders } = await adapter.list(folder);
+			for (const file of files) {
+				if (file.endsWith(TEMP_SUFFIX)) await adapter.remove(file.replace(/^\/+/, ""));
+			}
+			for (const child of folders) {
+				const path = child.replace(/^\/+/, "");
+				if (path !== configDir && !path.startsWith(`${configDir}/`)) pending.push(path);
+			}
 		}
 	}
 }

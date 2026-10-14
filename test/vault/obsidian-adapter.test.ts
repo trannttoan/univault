@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { ObsidianVaultAdapter, TEMP_SUFFIX } from "../../src/vault/obsidian-adapter";
+import { ObsidianVaultAdapter } from "../../src/vault/obsidian-adapter";
+import { TEMP_SUFFIX } from "../../src/vault/paths";
 import { FakeVault } from "../fakes/vault";
 
 function streamOf(chunks: Uint8Array[], failAfter?: number): ReadableStream<Uint8Array> {
@@ -14,6 +15,20 @@ function streamOf(chunks: Uint8Array[], failAfter?: number): ReadableStream<Uint
 }
 
 const enc = (s: string) => new TextEncoder().encode(s);
+
+describe("ObsidianVaultAdapter.removeTempFiles", () => {
+	it("removes temp files anywhere on disk except the config directory", async () => {
+		const vault = new FakeVault();
+		vault.setFile("note.md", "keep");
+		vault.setFile(`deep/a.md${TEMP_SUFFIX}`, "x");
+		vault.setFile(`.github/ci.yml${TEMP_SUFFIX}`, "x");
+		vault.setFile(`.obsidian/plugins/other/data.json${TEMP_SUFFIX}`, "theirs");
+
+		await new ObsidianVaultAdapter(vault).removeTempFiles();
+
+		expect([...vault.files.keys()].sort()).toEqual([".obsidian/plugins/other/data.json.univault-partial", "note.md"]);
+	});
+});
 
 describe("ObsidianVaultAdapter.writeChunked", () => {
 	it("cancels the stream when an append fails", async () => {

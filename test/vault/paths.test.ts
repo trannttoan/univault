@@ -34,6 +34,8 @@ describe("canonicalizeRepoPath", () => {
 		".Obsidian/plugins/x/main.js",
 		".obsidian/plugins/univault/x",
 		".obsidian//plugins/univault/main.js",
+		"notes/a.md.univault-partial",
+		"a.md.UNIVAULT-PARTIAL",
 	])("rejects %j as path-unsafe", (input) => {
 		expect(() => canon(input)).toThrow(UnivaultError);
 		try {

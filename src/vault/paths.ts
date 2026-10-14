@@ -1,5 +1,8 @@
 import { UnivaultError } from "../errors";
 
+// Suffix of the temporary file a download streams into, beside its target.
+export const TEMP_SUFFIX = ".univault-partial";
+
 export function normalizeVaultPath(path: string): string {
 	return path.normalize("NFC");
 }
@@ -16,7 +19,8 @@ export function canonicalizeRepoPath(raw: string, configDir: string, pluginDir: 
 		path.includes("\0") ||
 		segments.some((s) => s === "" || s === "." || s === "..") ||
 		isWithin(lower, configDir.toLowerCase()) ||
-		isWithin(lower, pluginDir.toLowerCase());
+		isWithin(lower, pluginDir.toLowerCase()) ||
+		lower.endsWith(TEMP_SUFFIX);
 	if (unsafe) throw new UnivaultError("path-unsafe", { cause: new Error(`Unsafe repository path: ${raw}`) });
 	return path;
 }
