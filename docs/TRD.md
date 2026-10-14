@@ -88,9 +88,14 @@ Relationships: SyncAnchor is the parent of every IndexEntry. A PendingConflict r
 
 **GitHub.** REST only. Git Data endpoints (blobs, trees, commits, refs) for reads and writes; compare for remote deltas; the raw blob media type for streaming downloads; repository and installation endpoints during setup; device-flow and token endpoints on the GitHub App. All writes are conditional: the ref update names the expected parent, and a rejection means "pull and retry," never "force."
 
-Measured on 2026-10-14 against `api.github.com` with an OAuth user token:
+Measured on 2026-10-14 against `api.github.com` with an OAuth user token, using a throwaway private repository created empty and then populated:
 
 - `GET /repos/{o}/{r}/git/ref/heads/{branch}` returns a weak ETag (`W/"<hash>"`) with `Cache-Control: private, max-age=60`. Sending that value back in `If-None-Match` returns 304 with the strong form of the same ETag. Three consecutive 304s left `x-ratelimit-used` and `x-ratelimit-remaining` unchanged; the next 200 consumed one request.
+- Empty repository: `GET git/ref/heads/main`, `POST git/blobs` and `GET git/trees/{sha}` all return 409 with `{"message":"Git Repository is empty."}`. The client maps 409 on the Git Data read endpoints to `not-found`, the same as a missing branch.
+- Empty repository: `PUT contents/{path}` with `branch` returns 201 and creates the branch with a root commit (no parents); the response carries `commit.sha` and `commit.tree.sha`. The ref read returns 200 afterwards. This is how the first commit into an empty repository is made.
+- Non-empty repository, missing branch: `GET git/ref/heads/{branch}` returns 404 `{"message":"Not Found"}`, and `PUT contents/{path}` with that branch returns 404 `{"message":"Branch <name> not found"}`. The plugin does not create branches on non-empty repositories.
+- `PATCH git/refs/heads/{branch}` with `force: false` returns 422 both for a non-fast-forward (`Update is not a fast forward`) and for an unknown SHA (`Object does not exist`). The client maps 422 on a ref update to `conflict-retry`; the unknown-SHA case cannot arise because the commit was just created.
+- `POST git/blobs` with content `hello` returns 201 and SHA `b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0`, the same as the local Git blob hash.
 
 **Orchestrator ↔ detectors.** Both detectors return a delta value (`Map<path, Change>`) and never mutate anything. Classification per path is a pure function of `(localChange, remoteChange)` with exactly these outcomes: `noop | download | upload | delete-local | delete-remote | merge | conflict`.
 

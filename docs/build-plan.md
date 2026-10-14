@@ -210,3 +210,4 @@ Unordered. Each is a small slice with its own acceptance when picked up.
 - PRD 5.1: the repository-creation path is conditional on spike S2; the PRD already marks it spike-dependent and should be updated with the outcome after Phase 4.
 - PRD section 7 scale targets are provisional and are replaced by Phase 3's measurements.
 - TRD stack: `minAppVersion` 1.13.0 rests on the declarative settings API, not on ranged `readBinary`, which no published Obsidian API offers (corrected 2026-10-14). Phase 0 still confirms both devices accept it.
+- TRD interface contract: GitHub's responses on an empty repository, on a missing branch, and to a non-fast-forward ref update were measured on 2026-10-14 and recorded there. The first sync into an empty repository makes two commits: the Contents API bootstrap and the regular sync commit.
