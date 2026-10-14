@@ -1,4 +1,8 @@
-export type RefResult = { notModified: true } | { notModified: false; sha: string; etag: string | null };
+// "empty": the repository has no commits at all (GitHub answers 409).
+export type RefResult =
+	| { kind: "not-modified" }
+	| { kind: "empty" }
+	| { kind: "found"; sha: string; etag: string | null };
 
 export interface Commit {
 	sha: string;

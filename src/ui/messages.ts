@@ -21,9 +21,7 @@ export function errorMessage(code: ErrorCode): string {
 export function outcomeMessage(outcome: SyncOutcome): string {
 	switch (outcome.kind) {
 		case "remote-empty":
-			return `Univault: nothing to sync. The repository is empty or has no "${outcome.branch}" branch, and this vault has no files yet.`;
-		case "missing-branch":
-			return `Univault: the branch "${outcome.branch}" doesn't exist on the repository. Create it on GitHub or choose another branch.`;
+			return "Univault: nothing to sync. The repository is empty and this vault has no files yet.";
 		case "needs-setup":
 			return "Univault: finish setup in settings (token, repository and branch).";
 		case "failed": {

@@ -113,26 +113,35 @@ describe("empty repository bootstrap", () => {
 	it("finishes as a no-op when both the repository and the vault are empty", async () => {
 		const outcome = await h.orchestrator.sync("manual");
 
-		expect(outcome).toEqual({ kind: "remote-empty", branch: "main" });
+		expect(outcome).toEqual({ kind: "remote-empty" });
 		expect(outcomeMessage(outcome)).toContain("empty");
 		expect(h.orchestrator.state).toBe("idle");
 		expect(h.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
 		expect(await h.store.getAnchor()).toBeNull();
 	});
 
-	it("refuses to create a missing branch on a non-empty repository", async () => {
+	it("fails not-found without bootstrapping when the branch is missing from a non-empty repository", async () => {
 		const head = h.github.commitFiles(REPO, "main", { "a.md": "a" });
 		h.settings = { ...h.settings, branch: "nope" };
 		h.vault.setFile("b.md", "b");
 
 		const outcome = await h.orchestrator.sync("manual");
 
-		expect(outcome).toMatchObject({ kind: "missing-branch", branch: "nope", error: { code: "not-found" } });
-		expect(outcomeMessage(outcome)).toContain('"nope" doesn\'t exist');
+		expect(outcome.kind === "failed" && outcome.error.code).toBe("not-found");
 		expect(h.orchestrator.state).toBe("error");
-		expect(h.github.requests.filter((r) => r.method === "PUT").map((r) => r.status)).toEqual([404]);
+		expect(h.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
 		expect(h.github.head(REPO, "main")).toBe(head);
 		expect(h.github.head(REPO, "nope")).toBeUndefined();
+	});
+
+	it("fails not-found without bootstrapping when the repository does not exist", async () => {
+		h.settings = { ...h.settings, repository: "octo/missing" };
+		h.vault.setFile("b.md", "b");
+
+		const outcome = await h.orchestrator.sync("manual");
+
+		expect(outcome.kind === "failed" && outcome.error.code).toBe("not-found");
+		expect(h.github.requests.filter((r) => r.method === "PUT")).toHaveLength(0);
 	});
 
 	it("does not bootstrap when the branch disappears after an anchor exists", async () => {

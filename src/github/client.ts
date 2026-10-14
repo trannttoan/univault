@@ -21,8 +21,10 @@ interface SendOptions {
 	accept?: string;
 	etag?: string | null;
 	conflictStatus?: number;
-	// Git Data reads on an empty repository return 409; treated like a missing branch.
+	// Git Data reads on an empty repository return 409; treated like a missing object.
 	emptyIsNotFound?: boolean;
+	// Statuses returned to the caller instead of thrown.
+	passStatus?: number;
 }
 
 export class GitHubClient {
@@ -55,11 +57,15 @@ export class GitHubClient {
 	async getRef(repo: string, branch: string, etag?: string | null): Promise<RefResult> {
 		const res = await this.send("GET", `${repoPath(repo)}/git/ref/heads/${segments(branch)}`, {
 			etag,
-			emptyIsNotFound: true,
+			passStatus: 409,
 		});
-		if (res.status === 304) return { notModified: true };
+		if (res.status === 304) return { kind: "not-modified" };
+		if (res.status === 409) {
+			await res.body?.cancel();
+			return { kind: "empty" };
+		}
 		const json = (await res.json()) as { object: { sha: string } };
-		return { notModified: false, sha: json.object.sha, etag: res.headers.get("etag") };
+		return { kind: "found", sha: json.object.sha, etag: res.headers.get("etag") };
 	}
 
 	async getCommit(repo: string, sha: string): Promise<Commit> {
@@ -174,7 +180,7 @@ export class GitHubClient {
 				const detail = error instanceof Error ? `${error.name}: ${error.message}` : "network failure";
 				throw new UnivaultError("offline", { cause: new Error(this.redact(`${method} ${path} failed: ${detail}`)) });
 			}
-			if (res.ok || res.status === 304) return res;
+			if (res.ok || res.status === 304 || res.status === options.passStatus) return res;
 
 			const wait = isRead && attempt < MAX_READ_RETRIES ? retryDelay(res, attempt) : null;
 			if (wait === null) throw await this.toError(method, path, res, options);

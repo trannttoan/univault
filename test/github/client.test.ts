@@ -141,17 +141,17 @@ describe("GitHubClient", () => {
 	it("round-trips the ref ETag into a free 304", async () => {
 		const sha = github.commitFiles(REPO, "main", { "a.md": "a" });
 		const first = await client.getRef(REPO, "main");
-		expect(first).toMatchObject({ notModified: false, sha });
-		const etag = first.notModified ? null : first.etag;
+		expect(first).toMatchObject({ kind: "found", sha });
+		const etag = first.kind === "found" ? first.etag : null;
 		expect(etag).toMatch(/^W\//);
 
 		const quota = github.rateLimitRemaining;
-		expect(await client.getRef(REPO, "main", etag)).toEqual({ notModified: true });
+		expect(await client.getRef(REPO, "main", etag)).toEqual({ kind: "not-modified" });
 		expect(github.requests.at(-1)?.status).toBe(304);
 		expect(github.rateLimitRemaining).toBe(quota);
 
 		const moved = github.commitFiles(REPO, "main", { "a.md": "b" });
-		expect(await client.getRef(REPO, "main", etag)).toMatchObject({ notModified: false, sha: moved });
+		expect(await client.getRef(REPO, "main", etag)).toMatchObject({ kind: "found", sha: moved });
 	});
 
 	it("maps a missing branch to not-found", async () => {
@@ -159,8 +159,8 @@ describe("GitHubClient", () => {
 		expect((await caught(client.getRef(REPO, "other"))).code).toBe("not-found");
 	});
 
-	it("maps 409 on git data reads of an empty repository to not-found", async () => {
-		expect((await caught(client.getRef(REPO, "main"))).code).toBe("not-found");
+	it("reports an empty repository from the ref read, and 409 on other reads as not-found", async () => {
+		expect(await client.getRef(REPO, "main")).toEqual({ kind: "empty" });
 		expect((await caught(client.getTree(REPO, "a".repeat(40)))).code).toBe("not-found");
 		expect((await caught(client.getBlobStream(REPO, "a".repeat(40)))).code).toBe("not-found");
 		expect(github.requests.map((r) => r.status)).toEqual([409, 409, 409]);

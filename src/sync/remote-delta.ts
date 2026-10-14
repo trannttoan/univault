@@ -4,7 +4,10 @@ import type { IndexEntry, SyncAnchor } from "../store/db";
 
 export type RemoteChange = { kind: "added" | "modified"; sha: string } | { kind: "removed" };
 
-export type HeadCheck = { kind: "unchanged"; etag: string | null } | { kind: "changed"; sha: string; etag: string | null };
+export type HeadCheck =
+	| { kind: "unchanged"; etag: string | null }
+	| { kind: "changed"; sha: string; etag: string | null }
+	| { kind: "empty" };
 
 // The compare endpoint lists at most 300 files; a full page may be truncated.
 const COMPARE_FILE_LIMIT = 300;
@@ -17,7 +20,8 @@ export async function checkHead(
 	anchor: SyncAnchor | null,
 ): Promise<HeadCheck> {
 	const ref = await client.getRef(repository, branch, anchor?.refEtag);
-	if (ref.notModified) return { kind: "unchanged", etag: anchor?.refEtag ?? null };
+	if (ref.kind === "empty") return { kind: "empty" };
+	if (ref.kind === "not-modified") return { kind: "unchanged", etag: anchor?.refEtag ?? null };
 	if (anchor && ref.sha === anchor.commitSha) return { kind: "unchanged", etag: ref.etag };
 	return { kind: "changed", sha: ref.sha, etag: ref.etag };
 }

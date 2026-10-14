@@ -35,8 +35,6 @@ export async function uploadBlob(
 	return { sha, size: bytes.byteLength };
 }
 
-// Git Data refuses every write on an empty repository; the Contents API creates
-// the branch with a root commit holding this one file.
 export async function bootstrapBranch(
 	client: GitHubClient,
 	repository: string,

@@ -9,15 +9,14 @@ import { canonicalizeRepoPath } from "../vault/paths";
 import { classifyAll } from "./classify";
 import { commitMessage, createSyncCommit } from "./commit";
 import { type LocalChange, localDelta } from "./local-delta";
-import { type HeadCheck, type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
+import { type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
 
 export type SyncState = "idle" | "syncing" | "error";
 
 export type SyncOutcome =
 	| { kind: "synced"; uploaded: number; downloaded: number }
-	| { kind: "remote-empty"; branch: string }
+	| { kind: "remote-empty" }
 	| { kind: "needs-setup" }
-	| { kind: "missing-branch"; branch: string; error: UnivaultError }
 	| { kind: "failed"; error: UnivaultError };
 
 export interface OrchestratorDeps {
@@ -114,13 +113,11 @@ export class Orchestrator {
 
 		// Without an anchor the head always reads as changed, and the remote delta is the full tree.
 		const index = await store.getIndex();
-		let check: HeadCheck;
-		try {
-			check = await checkHead(client, repository, branch, anchor);
-		} catch (error) {
-			const missing = error instanceof UnivaultError && error.code === "not-found";
-			if (missing && !anchor && !bootstrapped) return this.bootstrap(context, index);
-			throw error;
+		const check = await checkHead(client, repository, branch, anchor);
+		if (check.kind === "empty") {
+			// Only a never-synced vault seeds an empty repository; with an anchor it was emptied behind us.
+			if (anchor || bootstrapped) throw new UnivaultError("not-found", { cause: new Error("Repository is empty") });
+			return this.bootstrap(context, index);
 		}
 		let head = anchor ? { commitSha: anchor.commitSha, treeSha: anchor.treeSha } : null;
 		let remote = new Map<string, RemoteChange>();
@@ -175,32 +172,25 @@ export class Orchestrator {
 	private async etagFor(client: GitHubClient, repository: string, branch: string, sha: string): Promise<string | null> {
 		try {
 			const ref = await client.getRef(repository, branch);
-			return !ref.notModified && ref.sha === sha ? ref.etag : null;
+			return ref.kind === "found" && ref.sha === sha ? ref.etag : null;
 		} catch {
 			return null;
 		}
 	}
 
-	// No branch to read: an empty repository, or a branch missing from a non-empty one.
+	// The repository has no commits: git data refuses every write, so the first file goes
+	// through the contents api, which creates the branch with a root commit.
 	private async bootstrap(context: Context, index: Map<string, IndexEntry>): Promise<SyncOutcome | "rejected"> {
 		const { client, login, settings } = context;
 		const local = await localDelta(this.deps.vault, index);
 		const files = [...local].filter(([, c]) => c.kind !== "deleted").sort(([a], [b]) => (a < b ? -1 : 1));
-		if (files.length === 0) return { kind: "remote-empty", branch: settings.branch };
+		if (files.length === 0) return { kind: "remote-empty" };
 
 		const [path, change] = files[0] as [string, Extract<LocalChange, { vaultPath: string }>];
 		const message = commitMessage(settings.deviceName, login);
-		try {
-			const file = { path, ...change };
-			const { repository, branch } = settings;
-			await bootstrapBranch(client, repository, branch, this.deps.vault, file, this.deps.uploadCapBytes, message);
-		} catch (error) {
-			// 404 here means a non-empty repository without this branch; phase 0 never creates one.
-			if (error instanceof UnivaultError && error.code === "not-found") {
-				return { kind: "missing-branch", branch: settings.branch, error };
-			}
-			throw error;
-		}
+		const file = { path, ...change };
+		const { repository, branch } = settings;
+		await bootstrapBranch(client, repository, branch, this.deps.vault, file, this.deps.uploadCapBytes, message);
 		const rest = await this.cycle(context, true);
 		return rest !== "rejected" && rest.kind === "synced" ? { ...rest, uploaded: rest.uploaded + 1 } : rest;
 	}
