@@ -86,6 +86,20 @@ describe("download cycle", () => {
 		expect((await h.store.getAnchor())?.commitSha).toBe(head);
 	});
 
+	it.each(["renamed", "copied", "changed"])("downloads a %s compare entry at its new path", async (status) => {
+		await h.inSync({ "old.md": "moved text" });
+		const head = h.github.commitFiles(REPO, "main", { "new.md": "moved text" });
+		const sha = await gitBlobSha(new TextEncoder().encode("moved text"));
+		h.github.inject("GET", /\/compare\//, {
+			status: 200,
+			body: { status: "ahead", files: [{ filename: "new.md", status, previous_filename: "old.md", sha }] },
+		});
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes("new.md"))).toBe("moved text");
+		expect((await h.store.getAnchor())?.commitSha).toBe(head);
+	});
+
 	it("falls back to the recursive tree when compare lists 300 files", async () => {
 		await h.inSync({ "a.md": "a" });
 		const files = Object.fromEntries(Array.from({ length: 301 }, (_, i) => [`bulk/n${i}.md`, `note ${i}`]));

@@ -36,9 +36,11 @@ export async function remoteDelta(
 	if (anchor) {
 		const compare = await client.getCompare(repository, anchor.commitSha, head.commitSha);
 		if (compare.status === "ahead" && compare.files.length < COMPARE_FILE_LIMIT) {
+			// renamed, copied and changed all leave content at `filename`.
 			for (const file of compare.files) {
-				if (file.status !== "added" && file.status !== "modified") continue;
-				delta.set(canonical(file.filename), { kind: file.status, sha: file.sha });
+				if (file.status === "removed") continue;
+				const path = canonical(file.filename);
+				delta.set(path, { kind: index.has(path) ? "modified" : "added", sha: file.sha });
 			}
 			return delta;
 		}
