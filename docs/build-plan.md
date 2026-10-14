@@ -23,7 +23,7 @@ The environment actual releases use is: a GitHub release containing `main.js`, `
 - **Goal:** A user who installs the tagged release through BRAT on a desktop and on the Android device can sign in with a token, name a repository and branch, press sync on one device, and see one changed note arrive on the other.
 - **Scope out:** Device-flow sign-in, repository picker, merging, conflicts, deletions, renames, ignore rules, first-sync preview, automatic triggers, history, config sync, large files, devices list, any settings beyond token, owner/repo, branch, and device name.
 - **Acceptance criteria:**
-  - CI builds from a tag, runs the test suite, and publishes a GitHub release that BRAT installs on both devices with `minAppVersion` 1.13.0; if either device rejects the version, the true minimum is recorded and the manifest corrected within this phase (spike S6).
+  - CI builds from a tag, runs the test suite, and publishes a GitHub release that BRAT installs on both devices with `minAppVersion` 1.13.0; if either device rejects the version, the true minimum is recorded and the manifest corrected within this phase.
   - Editing one note and pressing sync on device A produces exactly one commit on the branch with a `Univault-Device` trailer naming device A.
   - Pressing sync on device B with no local changes downloads that note by streamed transfer and writes it byte-identical.
   - Pressing sync when neither side changed makes no commit and costs zero quota against the remote head check.
@@ -109,7 +109,7 @@ The environment actual releases use is: a GitHub release containing `main.js`, `
   - Sending A to the background after edits pushes them.
   - With the network off, no automatic sync produces a notice or error state; the status shows offline; a manual sync reports offline once.
   - A one-hour session of continuous editing with ten changed files per pause stays under 500 requests, measured from the rate-limit headers.
-  - Spike S7: an unchanged head check returns 304 and does not decrement the remaining quota; if it does, the poll interval is adjusted and the TRD deferred decision resolved.
+  - Spike S7: an unchanged head check returns 304 and does not decrement the remaining quota for a GitHub App user-to-server token (already confirmed for an OAuth user token); if it does, the poll interval is adjusted and the TRD deferred decision resolved.
   - A rate-limited response pauses automatic syncs until the reset time and says so; it is never shown as an authentication error.
 - **Risk retired:** The propagation target and quota model hold with the chosen triggers.
 - **Depends on:** 1.
@@ -209,4 +209,4 @@ Unordered. Each is a small slice with its own acceptance when picked up.
 
 - PRD 5.1: the repository-creation path is conditional on spike S2; the PRD already marks it spike-dependent and should be updated with the outcome after Phase 4.
 - PRD section 7 scale targets are provisional and are replaced by Phase 3's measurements.
-- TRD stack: `minAppVersion` 1.13.0 is provisional until Phase 0 confirms it on both devices.
+- TRD stack: `minAppVersion` 1.13.0 rests on the declarative settings API, not on ranged `readBinary`, which no published Obsidian API offers (corrected 2026-10-14). Phase 0 still confirms both devices accept it.

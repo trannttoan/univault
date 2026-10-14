@@ -60,7 +60,7 @@ flowchart LR
 - Data store: IndexedDB via a thin typed wrapper (no ORM) — see decision log.
 - Auth: GitHub App with device flow and refresh tokens; fine-grained personal access token as fallback — see decision log.
 - Hosting: none. One GitHub App registration, named **Univault Sync** (slug `univault-sync`, client ID `Iv23liZmqSUyZ5EhTO5P`), owned by the `univault-app` organization. The codebase stays at `github.com/trannttoan/univault`. No telemetry endpoint. Verified token behavior is recorded in ADR-006.
-- Minimum Obsidian version: the release that shipped ranged `readBinary` (July 2026; exact number to confirm in spike S6). `appendBinary` arrived in 1.12.3.
+- Minimum Obsidian version: 1.13.0, for the declarative settings API (`SettingPage`, `SettingDefinition`) which the settings screens build on from Phase 4. The I/O floor is lower: `appendBinary` and `App.loadLocalStorage` / `saveLocalStorage` are in 1.12.3. No published API reads a byte range: `readBinary(path)` returns the whole file in every `obsidian.d.ts` from 1.12.3 through 1.14.4 (checked 2026-10-14), so bounded-memory reads of large files depend on spike S3.
 
 ## Core Data Model
 
@@ -87,6 +87,10 @@ Relationships: SyncAnchor is the parent of every IndexEntry. A PendingConflict r
 ## Interface Contracts
 
 **GitHub.** REST only. Git Data endpoints (blobs, trees, commits, refs) for reads and writes; compare for remote deltas; the raw blob media type for streaming downloads; repository and installation endpoints during setup; device-flow and token endpoints on the GitHub App. All writes are conditional: the ref update names the expected parent, and a rejection means "pull and retry," never "force."
+
+Measured on 2026-10-14 against `api.github.com` with an OAuth user token:
+
+- `GET /repos/{o}/{r}/git/ref/heads/{branch}` returns a weak ETag (`W/"<hash>"`) with `Cache-Control: private, max-age=60`. Sending that value back in `If-None-Match` returns 304 with the strong form of the same ETag. Three consecutive 304s left `x-ratelimit-used` and `x-ratelimit-remaining` unchanged; the next 200 consumed one request.
 
 **Orchestrator ↔ detectors.** Both detectors return a delta value (`Map<path, Change>`) and never mutate anything. Classification per path is a pure function of `(localChange, remoteChange)` with exactly these outcomes: `noop | download | upload | delete-local | delete-remote | merge | conflict`.
 
@@ -152,10 +156,10 @@ ADRs live in `docs/adr/`.
 
 - **S1 Scale envelope.** Synthetic vaults at 1k to 50k files; measure tree bytes and parse heap on Android, local scan time cold and warm, first-sync request count and wall time, incremental sync time. Replaces the provisional scale targets.
 - **S2 Repository creation under a GitHub App.** Verify whether a user-to-server token can create a user repository and how a new repository joins an installation limited to selected repositories. Fallback: send the user to github.com to create it, then refresh the picker.
-- **S3 Streaming uploads.** Test `fetch` with a Blob body obtained from the vault's resource URL, and with `duplex: "half"` streams, in Electron, Android WebView, and iOS WKWebView. Test whether the LFS storage endpoint sends CORS headers. Decides the mobile cap's future.
+- **S3 Streaming uploads.** Test `fetch` with a Blob body obtained from the vault's resource URL, and with `duplex: "half"` streams, in Electron, Android WebView, and iOS WKWebView. Test whether a streamed `fetch` of the vault resource URL reads a large file in bounded memory; no Obsidian API offers ranged reads. Test whether the LFS storage endpoint sends CORS headers. Decides the mobile cap's future.
 - **S4 Tarball CORS.** Authenticated archive download through `codeload.github.com` with a streaming body and incremental gunzip and untar. Decides the bulk first-sync path.
 - **S5 Tree inline content limits.** Find the maximum accepted `POST /git/trees` body with inline `content` entries and the failure mode past it.
-- **S6 Minimum Obsidian version.** Confirm the exact release carrying ranged `readBinary`, and that `appendBinary` behaves on iOS.
-- **S7 Free conditional polling.** Confirm that a 304 on the branch ref endpoint does not decrement `x-ratelimit-remaining` for user-to-server tokens.
+- **S6 Minimum Obsidian version.** Resolved 2026-10-14 except for iOS: ranged `readBinary` does not exist in any published API, and `minAppVersion` is 1.13.0 (see Stack). Still to confirm in Phase 1: `appendBinary` behaves on iOS.
+- **S7 Free conditional polling.** Confirm that a 304 on the branch ref endpoint does not decrement `x-ratelimit-remaining` for user-to-server tokens. Confirmed for an OAuth user token on 2026-10-14 (see Interface Contracts); GitHub documents the same for any authenticated request. GitHub App user-to-server tokens are measured in Phase 5.
 - **S8 Paragraph-overlap heuristic.** Build a corpus of realistic same-note edits and measure false conflicts versus silent bad merges for candidate rules (same paragraph, within N lines).
 - **S9 IndexedDB persistence on iOS.** Confirm WKWebView does not evict IndexedDB for an app-embedded WebView, and measure quota on a low-storage device. Fallback: mirror the anchor and index to the plugin folder as a recovery copy.
