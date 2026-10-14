@@ -103,7 +103,7 @@ describe("empty repository bootstrap", () => {
 
 		const head = h.github.head(REPO, "main")!;
 		const commit = h.github.commit(REPO, head)!;
-		const root = h.github.commit(REPO, commit.parents[0])!;
+		const root = h.github.commit(REPO, commit.parents[0]!)!;
 		expect(root.parents).toEqual([]);
 		expect(root.message.endsWith(TRAILER)).toBe(true);
 		expect(commit.message.endsWith(TRAILER)).toBe(true);

@@ -31,10 +31,13 @@ type Injected =
 	| { brokenStream: Uint8Array[] }
 	| "network";
 
+// Handlers read only the groups their own pattern captures.
+type Groups = [string, string, string, string, string];
+
 interface Route {
 	method: string;
 	pattern: RegExp;
-	handle: (repo: FakeRepo | undefined, match: RegExpExecArray, req: FakeRequest) => Response;
+	handle: (repo: FakeRepo | undefined, match: Groups, req: FakeRequest) => Response;
 }
 
 interface FakeRequest {
@@ -106,7 +109,7 @@ export class FakeGitHub {
 		this.cacheModes.push(init?.cache);
 		const injectedAt = this.injected.findIndex((i) => i.method === method && i.pattern.test(path));
 		if (injectedAt >= 0) {
-			const [{ response }] = this.injected.splice(injectedAt, 1);
+			const response = this.injected.splice(injectedAt, 1)[0]!.response;
 			if (response === "network") throw new TypeError("fetch failed");
 			if ("brokenStream" in response) {
 				const chunks = [...response.brokenStream];
@@ -135,8 +138,9 @@ export class FakeGitHub {
 			return this.respond(method, path, 200, { login: this.tokens.get(token) });
 		}
 		for (const route of this.routes) {
-			const match = route.pattern.exec(url.pathname);
-			if (route.method !== method || !match) continue;
+			const exec = route.pattern.exec(url.pathname);
+			if (route.method !== method || !exec) continue;
+			const match = exec as unknown as Groups;
 			const repo = this.repos.get(`${decodeURIComponent(match[1])}/${decodeURIComponent(match[2])}`);
 			const res = repo ? route.handle(repo, match, req) : json(404, { message: "Not Found" });
 			return this.record(method, path, res);

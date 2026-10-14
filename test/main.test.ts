@@ -30,7 +30,7 @@ describe("UnivaultPlugin", () => {
 
 	it("shows idle in the status bar and registers the sync command and settings", () => {
 		expect(fake.statusBarItems.map((el) => el.text)).toEqual(["Univault: idle"]);
-		expect(fake.statusBarItems[0].listeners.has("click")).toBe(true);
+		expect(fake.statusBarItems[0]?.listeners.has("click")).toBe(true);
 		expect(fake.commands.map((command) => command.id)).toEqual(["sync-now"]);
 		expect(fake.settingTabs).toHaveLength(1);
 	});
@@ -38,7 +38,7 @@ describe("UnivaultPlugin", () => {
 	it("reports an unfinished setup through a notice and the status bar", async () => {
 		expect(await plugin.syncNow()).toEqual({ kind: "needs-setup" });
 		expect(Notice.shown.at(-1)).toContain("finish setup");
-		expect(fake.statusBarItems[0].text).toBe("Univault: error");
+		expect(fake.statusBarItems[0]?.text).toBe("Univault: error");
 	});
 
 	it("syncs on a status bar click and shows exactly one notice, even when clicks coalesce", async () => {
