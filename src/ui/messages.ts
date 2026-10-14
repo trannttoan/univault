@@ -22,8 +22,10 @@ export function outcomeMessage(outcome: SyncOutcome): string {
 	switch (outcome.kind) {
 		case "needs-setup":
 			return "Univault: finish setup in settings (token, repository and branch).";
-		case "failed":
-			return `Univault: ${errorMessage(outcome.error.code)}`;
+		case "failed": {
+			const { code, paths } = outcome.error;
+			return `Univault: ${errorMessage(code)}${paths.length ? ` Files: ${paths.join(", ")}` : ""}`;
+		}
 		case "synced":
 			return outcome.uploaded + outcome.downloaded === 0
 				? "Univault: already in sync."

@@ -44,6 +44,8 @@ export class FakeGitHub {
 	readonly tokens = new Map<string, string>();
 	rateLimitRemaining = 5000;
 	blobChunkSize = 4;
+	// Runs before each request is handled, e.g. to let "another device" push mid-sync.
+	onRequest: ((method: string, path: string) => void) | null = null;
 	private readonly repos = new Map<string, FakeRepo>();
 	private readonly injected: { method: string; pattern: RegExp; response: Injected }[] = [];
 	private commitCounter = 0;
@@ -95,6 +97,7 @@ export class FakeGitHub {
 		const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
 		const method = init?.method ?? "GET";
 		const path = url.pathname + url.search;
+		this.onRequest?.(method, path);
 		const injectedAt = this.injected.findIndex((i) => i.method === method && i.pattern.test(path));
 		if (injectedAt >= 0) {
 			const [{ response }] = this.injected.splice(injectedAt, 1);

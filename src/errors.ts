@@ -11,12 +11,16 @@ export type ErrorCode =
 	| "unknown";
 
 // The message is the code itself; only the UI turns codes into words.
+// `paths` names the vault paths an error is about, for the UI to list.
 export class UnivaultError extends Error {
+	readonly paths: string[];
+
 	constructor(
 		readonly code: ErrorCode,
-		options?: { cause?: unknown },
+		options?: { cause?: unknown; paths?: string[] },
 	) {
 		super(code, options);
 		this.name = "UnivaultError";
+		this.paths = options?.paths ?? [];
 	}
 }

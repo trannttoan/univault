@@ -22,6 +22,7 @@ export default class UnivaultPlugin extends Plugin {
 			settings: () => this.settings,
 			store: this.store,
 			vault: new ObsidianVaultAdapter(this.app.vault),
+			uploadCapBytes: (Platform.isMobile ? 20 : 100) * 1024 * 1024,
 		});
 
 		const statusBar = this.addStatusBarItem();
