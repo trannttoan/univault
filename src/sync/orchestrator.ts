@@ -3,19 +3,21 @@ import type { GitHubClient } from "../github/client";
 import type { UnivaultSettings } from "../settings";
 import type { IndexEntry, StateStore, SyncAnchor } from "../store/db";
 import { download } from "../transfer/download";
-import { uploadBlob } from "../transfer/upload";
+import { bootstrapBranch, uploadBlob } from "../transfer/upload";
 import type { VaultAdapter } from "../vault/adapter";
 import { canonicalizeRepoPath, normalizeVaultPath } from "../vault/paths";
 import { classifyAll } from "./classify";
 import { commitMessage, createSyncCommit } from "./commit";
 import { type LocalChange, localDelta } from "./local-delta";
-import { type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
+import { type HeadCheck, type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
 
 export type SyncState = "idle" | "syncing" | "error";
 
 export type SyncOutcome =
 	| { kind: "synced"; uploaded: number; downloaded: number }
+	| { kind: "remote-empty"; branch: string }
 	| { kind: "needs-setup" }
+	| { kind: "missing-branch"; branch: string; error: UnivaultError }
 	| { kind: "failed"; error: UnivaultError };
 
 export interface OrchestratorDeps {
@@ -71,8 +73,9 @@ export class Orchestrator {
 			this.setState("syncing");
 			outcome = await this.runOnce();
 			this.lastOutcome = outcome;
-			if (outcome.kind === "synced") this.lastSyncAt = new Date();
-			this.setState(outcome.kind === "synced" ? "idle" : "error");
+			const ok = outcome.kind === "synced" || outcome.kind === "remote-empty";
+			if (ok) this.lastSyncAt = new Date();
+			this.setState(ok ? "idle" : "error");
 		} while (this.again);
 		return outcome;
 	}
@@ -98,7 +101,8 @@ export class Orchestrator {
 		}
 	}
 
-	private async cycle({ client, login, settings }: Context): Promise<SyncOutcome | "rejected"> {
+	private async cycle(context: Context, bootstrapped = false): Promise<SyncOutcome | "rejected"> {
+		const { client, login, settings } = context;
 		const { store, vault } = this.deps;
 		const { repository, branch } = settings;
 
@@ -110,7 +114,14 @@ export class Orchestrator {
 
 		// Without an anchor the head always reads as changed, and the remote delta is the full tree.
 		const index = await store.getIndex();
-		const check = await checkHead(client, repository, branch, anchor);
+		let check: HeadCheck;
+		try {
+			check = await checkHead(client, repository, branch, anchor);
+		} catch (error) {
+			const missing = error instanceof UnivaultError && error.code === "not-found";
+			if (missing && !anchor && !bootstrapped) return this.bootstrap(context, index);
+			throw error;
+		}
 		let head = anchor ? { commitSha: anchor.commitSha, treeSha: anchor.treeSha } : null;
 		let remote = new Map<string, RemoteChange>();
 		if (check.kind === "changed") {
@@ -156,6 +167,30 @@ export class Orchestrator {
 		}
 		await store.advance({ repository, branch, ...commit, refEtag: null }, [...entries, ...indexed]);
 		return { kind: "synced", uploaded: entries.length, downloaded: downloads.length };
+	}
+
+	// No branch to read: an empty repository, or a branch missing from a non-empty one.
+	private async bootstrap(context: Context, index: Map<string, IndexEntry>): Promise<SyncOutcome | "rejected"> {
+		const { client, login, settings } = context;
+		const local = await localDelta(this.deps.vault, index);
+		const files = [...local].filter(([, c]) => c.kind !== "deleted").sort(([a], [b]) => (a < b ? -1 : 1));
+		if (files.length === 0) return { kind: "remote-empty", branch: settings.branch };
+
+		const [path, change] = files[0] as [string, Extract<LocalChange, { vaultPath: string }>];
+		const message = commitMessage(settings.deviceName, login);
+		try {
+			const file = { path, ...change };
+			const { repository, branch } = settings;
+			await bootstrapBranch(client, repository, branch, this.deps.vault, file, this.deps.uploadCapBytes, message);
+		} catch (error) {
+			// 404 here means a non-empty repository without this branch; phase 0 never creates one.
+			if (error instanceof UnivaultError && error.code === "not-found") {
+				return { kind: "missing-branch", branch: settings.branch, error };
+			}
+			throw error;
+		}
+		const rest = await this.cycle(context, true);
+		return rest !== "rejected" && rest.kind === "synced" ? { ...rest, uploaded: rest.uploaded + 1 } : rest;
 	}
 
 	private async downloadedEntries(paths: string[], remote: Map<string, RemoteChange>): Promise<IndexEntry[]> {
