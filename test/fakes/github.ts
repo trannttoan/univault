@@ -25,7 +25,11 @@ export interface RequestRecord {
 	status: number;
 }
 
-type Injected = { status: number; headers?: Record<string, string>; body?: unknown } | "network";
+type Injected =
+	| { status: number; headers?: Record<string, string>; body?: unknown }
+	// A 200 whose body sends these chunks, then errors, like a connection dropped mid-transfer.
+	| { brokenStream: Uint8Array[] }
+	| "network";
 
 interface Route {
 	method: string;
@@ -104,6 +108,17 @@ export class FakeGitHub {
 		if (injectedAt >= 0) {
 			const [{ response }] = this.injected.splice(injectedAt, 1);
 			if (response === "network") throw new TypeError("fetch failed");
+			if ("brokenStream" in response) {
+				const chunks = [...response.brokenStream];
+				const body = new ReadableStream<Uint8Array>({
+					pull(controller) {
+						const chunk = chunks.shift();
+						if (chunk) controller.enqueue(chunk);
+						else controller.error(new TypeError("network error"));
+					},
+				});
+				return this.record(method, path, new Response(body, { status: 200 }));
+			}
 			return this.respond(method, path, response.status, response.body ?? { message: "injected" }, response.headers);
 		}
 

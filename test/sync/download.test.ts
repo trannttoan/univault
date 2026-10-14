@@ -23,6 +23,27 @@ describe("download cycle", () => {
 		expect([...h.vault.files.keys()].some((p) => p.endsWith(".univault-partial"))).toBe(false);
 	});
 
+	it("leaves vault, anchor and index untouched when a download drops mid-stream, then recovers", async () => {
+		await h.inSync({ "a.md": "original" });
+		const anchor = await h.store.getAnchor();
+		const index = await h.store.getIndex();
+		const head = h.github.commitFiles(REPO, "main", { "a.md": "the new remote text" });
+		const enc = new TextEncoder();
+		h.github.inject("GET", /\/git\/blobs\//, { brokenStream: [enc.encode("the "), enc.encode("new ")] });
+
+		const failed = await h.orchestrator.sync("manual");
+
+		expect(failed.kind).toBe("failed");
+		expect(new TextDecoder().decode(h.vault.bytes("a.md"))).toBe("original");
+		expect(await h.store.getAnchor()).toEqual(anchor);
+		expect(await h.store.getIndex()).toEqual(index);
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes("a.md"))).toBe("the new remote text");
+		expect([...h.vault.files.keys()]).toEqual(["a.md"]);
+		expect((await h.store.getAnchor())?.commitSha).toBe(head);
+	});
+
 	it("advances the anchor to the head and indexes the downloads", async () => {
 		await h.inSync({ "a.md": "a" });
 		const head = h.github.commitFiles(REPO, "main", { "b.md": "new" });
