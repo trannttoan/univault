@@ -39,6 +39,16 @@ describe("download cycle", () => {
 		expect(h.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
 	});
 
+	it("downloads a dot-prefixed file the vault index never lists", async () => {
+		await h.inSync({ "a.md": "a" });
+		const head = h.github.commitFiles(REPO, "main", { ".gitignore": "node_modules\n" });
+
+		expect(await h.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes(".gitignore"))).toBe("node_modules\n");
+		expect((await h.store.getAnchor())?.commitSha).toBe(head);
+		expect((await h.store.getIndex()).has(".gitignore")).toBe(true);
+	});
+
 	it.each(["../escape.md", ".obsidian/plugins/univault/main.js", ".OBSIDIAN/app.json"])(
 		"refuses %s with path-unsafe and writes nothing",
 		async (unsafe) => {

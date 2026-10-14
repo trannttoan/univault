@@ -23,13 +23,21 @@ export class FakeVault implements VaultLike {
 		return this.files.get(path)?.bytes;
 	}
 
+	// Like Obsidian's index, skips any path with a dot-prefixed segment.
 	getFiles() {
-		return [...this.files].map(([path, file]) => ({ path, stat: { mtime: file.mtime, size: file.bytes.byteLength } }));
+		return [...this.files]
+			.filter(([path]) => !path.split("/").some((segment) => segment.startsWith(".")))
+			.map(([path, file]) => ({ path, stat: { mtime: file.mtime, size: file.bytes.byteLength } }));
 	}
 
 	readonly adapter: VaultLike["adapter"] = {
 		exists: async (path) => this.files.has(path) || this.folders.has(path),
 		readBinary: async (path) => this.require(path).bytes.slice().buffer,
+		stat: async (path) => {
+			const file = this.files.get(path);
+			if (file) return { type: "file", mtime: file.mtime, size: file.bytes.byteLength };
+			return this.folders.has(path) ? { type: "folder", mtime: 0, size: 0 } : null;
+		},
 		writeBinary: async (path, data) => {
 			this.requireParent(path);
 			this.files.set(path, { bytes: new Uint8Array(data.slice(0)), mtime: ++this.clock });

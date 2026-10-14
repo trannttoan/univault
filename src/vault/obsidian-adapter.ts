@@ -8,6 +8,7 @@ export interface VaultLike {
 	adapter: {
 		exists(path: string): Promise<boolean>;
 		readBinary(path: string): Promise<ArrayBuffer>;
+		stat(path: string): Promise<{ type: "file" | "folder"; mtime: number; size: number } | null>;
 		writeBinary(path: string, data: ArrayBuffer): Promise<void>;
 		appendBinary(path: string, data: ArrayBuffer): Promise<void>;
 		remove(path: string): Promise<void>;
@@ -28,6 +29,11 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 
 	async read(path: string): Promise<Uint8Array> {
 		return new Uint8Array(await this.vault.adapter.readBinary(path));
+	}
+
+	async stat(path: string): Promise<{ mtime: number; size: number } | null> {
+		const stat = await this.vault.adapter.stat(path);
+		return stat?.type === "file" ? { mtime: stat.mtime, size: stat.size } : null;
 	}
 
 	async writeChunked(path: string, chunks: ReadableStream<Uint8Array>): Promise<void> {

@@ -5,7 +5,7 @@ import type { IndexEntry, StateStore, SyncAnchor } from "../store/db";
 import { download } from "../transfer/download";
 import { bootstrapBranch, uploadBlob } from "../transfer/upload";
 import type { VaultAdapter } from "../vault/adapter";
-import { canonicalizeRepoPath, normalizeVaultPath } from "../vault/paths";
+import { canonicalizeRepoPath } from "../vault/paths";
 import { classifyAll } from "./classify";
 import { commitMessage, createSyncCommit } from "./commit";
 import { type LocalChange, localDelta } from "./local-delta";
@@ -194,14 +194,14 @@ export class Orchestrator {
 	}
 
 	private async downloadedEntries(paths: string[], remote: Map<string, RemoteChange>): Promise<IndexEntry[]> {
-		if (paths.length === 0) return [];
-		const stats = new Map((await this.deps.vault.list()).map((file) => [normalizeVaultPath(file.path), file]));
-		return paths.map((path) => {
-			const stat = stats.get(path);
+		const entries: IndexEntry[] = [];
+		for (const path of paths) {
+			const stat = await this.deps.vault.stat(path);
 			if (!stat) throw new UnivaultError("unknown", { cause: new Error("Downloaded file is missing"), paths: [path] });
 			const sha = (remote.get(path) as { sha: string }).sha;
-			return { path, mtime: stat.mtime, size: stat.size, blobSha: sha, mode: FILE_MODE };
-		});
+			entries.push({ path, mtime: stat.mtime, size: stat.size, blobSha: sha, mode: FILE_MODE });
+		}
+		return entries;
 	}
 
 	private setState(state: SyncState): void {
