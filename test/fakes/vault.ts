@@ -1,0 +1,72 @@
+import type { VaultLike } from "../../src/vault/obsidian-adapter";
+
+interface StoredFile {
+	bytes: Uint8Array;
+	mtime: number;
+}
+
+// In-memory stand-in for Obsidian's Vault and its DataAdapter.
+export class FakeVault implements VaultLike {
+	readonly files = new Map<string, StoredFile>();
+	readonly folders = new Set<string>([""]);
+	readonly appendCalls: string[] = [];
+	private clock = 1_000;
+
+	setFile(path: string, content: string | Uint8Array): void {
+		const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content;
+		this.addParents(path);
+		this.files.set(path, { bytes, mtime: ++this.clock });
+	}
+
+	bytes(path: string): Uint8Array | undefined {
+		return this.files.get(path)?.bytes;
+	}
+
+	getFiles() {
+		return [...this.files].map(([path, file]) => ({ path, stat: { mtime: file.mtime, size: file.bytes.byteLength } }));
+	}
+
+	readonly adapter: VaultLike["adapter"] = {
+		exists: async (path) => this.files.has(path) || this.folders.has(path),
+		readBinary: async (path) => this.require(path).bytes.slice().buffer,
+		writeBinary: async (path, data) => {
+			this.requireParent(path);
+			this.files.set(path, { bytes: new Uint8Array(data.slice(0)), mtime: ++this.clock });
+		},
+		appendBinary: async (path, data) => {
+			this.appendCalls.push(path);
+			const file = this.require(path);
+			const bytes = new Uint8Array(file.bytes.byteLength + data.byteLength);
+			bytes.set(file.bytes);
+			bytes.set(new Uint8Array(data), file.bytes.byteLength);
+			this.files.set(path, { bytes, mtime: ++this.clock });
+		},
+		remove: async (path) => {
+			this.require(path);
+			this.files.delete(path);
+		},
+		rename: async (path, newPath) => {
+			if (this.files.has(newPath)) throw new Error("Destination file already exists!");
+			this.requireParent(newPath);
+			this.files.set(newPath, this.require(path));
+			this.files.delete(path);
+		},
+		mkdir: async (path) => this.addParents(`${path}/x`),
+	};
+
+	private require(path: string): StoredFile {
+		const file = this.files.get(path);
+		if (!file) throw new Error(`ENOENT: ${path}`);
+		return file;
+	}
+
+	private requireParent(path: string): void {
+		const parent = path.slice(0, Math.max(path.lastIndexOf("/"), 0));
+		if (!this.folders.has(parent)) throw new Error(`ENOENT: ${parent}`);
+	}
+
+	private addParents(path: string): void {
+		const parts = path.split("/").slice(0, -1);
+		for (let i = 1; i <= parts.length; i++) this.folders.add(parts.slice(0, i).join("/"));
+	}
+}
