@@ -41,6 +41,7 @@ interface FakeRequest {
 
 export class FakeGitHub {
 	readonly requests: RequestRecord[] = [];
+	readonly cacheModes: (RequestCache | undefined)[] = [];
 	readonly tokens = new Map<string, string>();
 	rateLimitRemaining = 5000;
 	blobChunkSize = 4;
@@ -98,6 +99,7 @@ export class FakeGitHub {
 		const method = init?.method ?? "GET";
 		const path = url.pathname + url.search;
 		this.onRequest?.(method, path);
+		this.cacheModes.push(init?.cache);
 		const injectedAt = this.injected.findIndex((i) => i.method === method && i.pattern.test(path));
 		if (injectedAt >= 0) {
 			const [{ response }] = this.injected.splice(injectedAt, 1);

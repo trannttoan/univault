@@ -157,7 +157,8 @@ export class GitHubClient {
 		};
 		if (options.etag) headers["If-None-Match"] = options.etag;
 		if (options.body !== undefined) headers["Content-Type"] = "application/json";
-		const init: RequestInit = { method, headers };
+		// The ref read carries max-age=60; a cached copy would hide our own push.
+		const init: RequestInit = { method, headers, cache: "no-store" };
 		if (options.body !== undefined) init.body = JSON.stringify(options.body);
 		const isRead = method === "GET";
 

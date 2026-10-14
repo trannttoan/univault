@@ -67,6 +67,13 @@ describe("GitHubClient", () => {
 		});
 	});
 
+	it("bypasses the http cache on reads and writes", async () => {
+		github.commitFiles(REPO, "main", { "a.md": "a" });
+		await client.getRef(REPO, "main");
+		await client.createBlob(REPO, new Uint8Array([1]));
+		expect(github.cacheModes).toEqual(["no-store", "no-store"]);
+	});
+
 	it("returns the login for the token", async () => {
 		expect(await client.getUser()).toEqual({ login: "octo" });
 	});
