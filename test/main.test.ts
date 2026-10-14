@@ -11,9 +11,10 @@ describe("UnivaultPlugin", () => {
 	let app: FakeApp;
 	let plugin: UnivaultPlugin;
 	let fake: FakePlugin;
+	let github: FakeGitHub;
 
 	beforeEach(async () => {
-		const github = new FakeGitHub();
+		github = new FakeGitHub();
 		github.addToken(TOKEN, "octo");
 		vi.stubGlobal("fetch", github.fetch);
 		app = new FakeApp();
@@ -53,13 +54,15 @@ describe("UnivaultPlugin", () => {
 		expect(JSON.stringify([...app.localStorage.values()])).toContain(TOKEN);
 	});
 
-	it("discards the anchor when the repository or branch changes", async () => {
-		const anchor = { repository: "octo/vault", branch: "main", commitSha: "c", treeSha: "t", refEtag: null };
-		await plugin.store?.advance(anchor, []);
-		await plugin.updateSettings({ deviceName: "Laptop" });
-		expect(await plugin.store?.getAnchor()).toEqual(anchor);
+	it("discards the anchor at the next sync after the repository changes", async () => {
+		github.createRepo("octo/other");
+		const head = github.commitFiles("octo/other", "main", { "other.md": "o" });
+		await plugin.session.signInWithToken(TOKEN);
+		await plugin.store.advance({ repository: "octo/vault", branch: "main", commitSha: "c", treeSha: "t", refEtag: null }, []);
+		await plugin.updateSettings({ repository: "octo/other" });
+		expect((await plugin.store.getAnchor())?.repository).toBe("octo/vault");
 
-		await plugin.updateSettings({ branch: "notes" });
-		expect(await plugin.store?.getAnchor()).toBeNull();
+		expect(await plugin.syncNow()).toEqual({ kind: "synced", uploaded: 0, downloaded: 1 });
+		expect(await plugin.store.getAnchor()).toMatchObject({ repository: "octo/other", commitSha: head });
 	});
 });

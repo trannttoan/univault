@@ -52,11 +52,9 @@ export default class UnivaultPlugin extends Plugin {
 		return outcome;
 	}
 
+	// The orchestrator discards an anchor for another repository or branch at the next sync.
 	async updateSettings(change: Partial<UnivaultSettings>): Promise<void> {
-		const next = { ...this.settings, ...change };
-		const moved = next.repository !== this.settings.repository || next.branch !== this.settings.branch;
-		this.settings = next;
+		this.settings = { ...this.settings, ...change };
 		await this.saveData(this.settings);
-		if (moved) await this.store.discardAnchor();
 	}
 }
