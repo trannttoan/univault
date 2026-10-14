@@ -60,7 +60,7 @@ flowchart LR
 - Data store: IndexedDB via a thin typed wrapper (no ORM) — see decision log.
 - Auth: GitHub App with device flow and refresh tokens; fine-grained personal access token as fallback — see decision log.
 - Hosting: none. One GitHub App registration, named **Univault Sync** (slug `univault-sync`, client ID `Iv23liZmqSUyZ5EhTO5P`), owned by the `univault-app` organization. The codebase stays at `github.com/trannttoan/univault`. No telemetry endpoint. Verified token behavior is recorded in ADR-006.
-- Minimum Obsidian version: 1.13.0, for the declarative settings API (`SettingPage`, `SettingDefinition`) which the settings screens build on from Phase 4. The I/O floor is lower: `appendBinary` and `App.loadLocalStorage` / `saveLocalStorage` are in 1.12.3. No published API reads a byte range: `readBinary(path)` returns the whole file in every `obsidian.d.ts` from 1.12.3 through 1.14.4 (checked 2026-10-14), so bounded-memory reads of large files depend on spike S3.
+- Minimum Obsidian version: 1.13.0, for the declarative settings API (`SettingPage`, `SettingDefinition`) which the settings screens build on from Phase 4. The I/O floor is lower: `appendBinary` arrived in 1.12.3, and `App.loadLocalStorage` / `saveLocalStorage` date from 1.8.7. No published API reads a byte range: `readBinary(path)` returns the whole file in every `obsidian.d.ts` from 1.12.3 through 1.14.4 (checked 2026-10-14), so bounded-memory reads of large files depend on spike S3.
 
 ## Core Data Model
 
