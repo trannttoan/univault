@@ -107,17 +107,18 @@ export class Orchestrator {
 			await store.discardAnchor();
 			anchor = null;
 		}
-		if (!anchor) throw notYet("first sync without an anchor");
 
+		// Without an anchor the head always reads as changed, and the remote delta is the full tree.
 		const index = await store.getIndex();
-		let head = { commitSha: anchor.commitSha, treeSha: anchor.treeSha };
-		let remote = new Map<string, RemoteChange>();
 		const check = await checkHead(client, repository, branch, anchor);
+		let head = anchor ? { commitSha: anchor.commitSha, treeSha: anchor.treeSha } : null;
+		let remote = new Map<string, RemoteChange>();
 		if (check.kind === "changed") {
 			head = { commitSha: check.sha, treeSha: (await client.getCommit(repository, check.sha)).treeSha };
 			const canonical = (path: string) => canonicalizeRepoPath(path, this.deps.configDir, this.deps.pluginDir);
 			remote = await remoteDelta(client, repository, anchor, head, index, canonical);
 		}
+		if (!head) throw new UnivaultError("unknown", { cause: new Error("No head without an anchor") });
 
 		const local = await localDelta(vault, index);
 		const outcomes = classifyAll(local, remote);
@@ -133,8 +134,8 @@ export class Orchestrator {
 
 		const uploads = [...outcomes].filter(([, o]) => o === "upload").map(([path]) => path);
 		if (uploads.length === 0) {
-			const next: SyncAnchor = { ...anchor, ...head, refEtag: check.etag };
-			if (check.kind === "changed" || check.etag !== anchor.refEtag || indexed.length) await store.advance(next, indexed);
+			const next: SyncAnchor = { repository, branch, ...head, refEtag: check.etag };
+			if (check.kind === "changed" || check.etag !== anchor?.refEtag || indexed.length) await store.advance(next, indexed);
 			return { kind: "synced", uploaded: 0, downloaded: downloads.length };
 		}
 
@@ -188,9 +189,4 @@ function sameOnBothSides(
 		}
 	}
 	return entries;
-}
-
-// Transitional: first sync arrives with the next slice.
-function notYet(what: string): UnivaultError {
-	return new UnivaultError("unknown", { cause: new Error(`Not implemented yet: ${what}`) });
 }
