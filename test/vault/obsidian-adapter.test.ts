@@ -28,6 +28,37 @@ describe("ObsidianVaultAdapter.removeTempFiles", () => {
 
 		expect([...vault.files.keys()].sort()).toEqual([".obsidian/plugins/other/data.json.univault-partial", "note.md"]);
 	});
+
+	it("never lists or touches a .git folder at any depth", async () => {
+		const vault = new FakeVault();
+		vault.setFile(`.git/objects/ab/cd${TEMP_SUFFIX}`, "git's");
+		vault.setFile(`sub/repo/.git/HEAD${TEMP_SUFFIX}`, "git's too");
+		vault.setFile(`sub/x.md${TEMP_SUFFIX}`, "ours");
+		const list = vi.spyOn(vault.adapter, "list");
+
+		await new ObsidianVaultAdapter(vault).removeTempFiles();
+
+		expect(list.mock.calls.map(([path]) => path).filter((p) => p.split("/").includes(".git"))).toEqual([]);
+		expect([...vault.files.keys()].sort()).toEqual([`.git/objects/ab/cd${TEMP_SUFFIX}`, `sub/repo/.git/HEAD${TEMP_SUFFIX}`]);
+	});
+
+	it("skips a folder that vanishes mid-walk and never lists a folder twice", async () => {
+		const vault = new FakeVault();
+		vault.setFile("a/x.md", "x");
+		vault.setFile(`b/y.md${TEMP_SUFFIX}`, "y");
+		const realList = vault.adapter.list.bind(vault.adapter);
+		const list = vi.spyOn(vault.adapter, "list").mockImplementation(async (path) => {
+			if (path === "a") throw new Error("ENOENT");
+			const listing = await realList(path);
+			// A link loop: b lists itself as a child.
+			return path === "b" ? { ...listing, folders: [...listing.folders, "b"] } : listing;
+		});
+
+		await new ObsidianVaultAdapter(vault).removeTempFiles();
+
+		expect(list.mock.calls.map(([path]) => path).filter((p) => p === "b")).toHaveLength(1);
+		expect(vault.files.has(`b/y.md${TEMP_SUFFIX}`)).toBe(false);
+	});
 });
 
 describe("ObsidianVaultAdapter.writeChunked", () => {

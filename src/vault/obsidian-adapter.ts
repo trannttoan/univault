@@ -85,18 +85,29 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 	}
 
 	// Walks the disk, not the vault index, which misses temp files in dot-prefixed folders.
-	// Repository paths with the temp suffix are refused, so every match is ours.
+	// Repository paths with the temp suffix are refused, so every match is ours. Skips the
+	// config directory and any .git folder, which no git tree can contain.
 	async removeTempFiles(): Promise<void> {
 		const { adapter, configDir } = this.vault;
+		const visited = new Set<string>();
 		const pending = ["/"];
 		for (let folder = pending.pop(); folder !== undefined; folder = pending.pop()) {
-			const { files, folders } = await adapter.list(folder);
-			for (const file of files) {
+			if (visited.has(folder)) continue;
+			visited.add(folder);
+			let listing: { files: string[]; folders: string[] };
+			try {
+				listing = await adapter.list(folder);
+			} catch {
+				continue; // Removed while we walked.
+			}
+			for (const file of listing.files) {
 				if (file.endsWith(TEMP_SUFFIX)) await adapter.remove(file.replace(/^\/+/, ""));
 			}
-			for (const child of folders) {
+			for (const child of listing.folders) {
 				const path = child.replace(/^\/+/, "");
-				if (path !== configDir && !path.startsWith(`${configDir}/`)) pending.push(path);
+				const name = path.slice(path.lastIndexOf("/") + 1);
+				if (name === ".git" || path === configDir || path.startsWith(`${configDir}/`)) continue;
+				pending.push(path);
 			}
 		}
 	}
