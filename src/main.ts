@@ -38,6 +38,8 @@ export default class UnivaultPlugin extends Plugin {
 		render();
 		this.registerDomEvent(statusBar, "click", () => void this.syncNow());
 
+		// Mobile has no status bar, so the ribbon is its tap target.
+		this.addRibbonIcon("refresh-cw", "Sync now", () => void this.syncNow());
 		this.addCommand({
 			id: "sync-now",
 			name: "Sync now",

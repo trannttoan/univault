@@ -63,6 +63,7 @@ export class Plugin {
 	readonly statusBarItems: FakeElement[] = [];
 	readonly commands: Command[] = [];
 	readonly settingTabs: PluginSettingTab[] = [];
+	readonly ribbonIcons: { icon: string; title: string; callback: () => unknown }[] = [];
 	data: unknown = null;
 
 	constructor(
@@ -74,6 +75,11 @@ export class Plugin {
 		const el = new FakeElement();
 		this.statusBarItems.push(el);
 		return el;
+	}
+
+	addRibbonIcon(icon: string, title: string, callback: () => unknown): FakeElement {
+		this.ribbonIcons.push({ icon, title, callback });
+		return new FakeElement();
 	}
 
 	addCommand(command: Command): Command {

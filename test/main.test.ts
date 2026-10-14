@@ -56,6 +56,13 @@ describe("UnivaultPlugin", () => {
 		expect(Notice.shown.length).toBe(coalesced + 1);
 	});
 
+	it("adds a sync now ribbon icon for mobile that reports once", async () => {
+		expect(fake.ribbonIcons.map(({ icon, title }) => [icon, title])).toEqual([["refresh-cw", "Sync now"]]);
+		const before = Notice.shown.length;
+		fake.ribbonIcons[0]?.callback();
+		await vi.waitFor(() => expect(Notice.shown.length).toBe(before + 1));
+	});
+
 	it("defaults to branch main and the platform as device name", () => {
 		expect(plugin.settings).toEqual({ repository: "", branch: "main", deviceName: "Mac" });
 	});
