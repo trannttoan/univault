@@ -41,6 +41,20 @@ describe("UnivaultPlugin", () => {
 		expect(fake.statusBarItems[0].text).toBe("Univault: error");
 	});
 
+	it("syncs on a status bar click and shows exactly one notice, even when clicks coalesce", async () => {
+		const click = fake.statusBarItems[0]?.listeners.get("click");
+		expect(click).toBeDefined();
+		const before = Notice.shown.length;
+		click?.();
+		await vi.waitFor(() => expect(Notice.shown.length).toBe(before + 1));
+
+		const coalesced = Notice.shown.length;
+		const first = plugin.syncNow();
+		const second = plugin.syncNow();
+		expect(await first).toEqual(await second);
+		expect(Notice.shown.length).toBe(coalesced + 1);
+	});
+
 	it("defaults to branch main and the platform as device name", () => {
 		expect(plugin.settings).toEqual({ repository: "", branch: "main", deviceName: "Mac" });
 	});

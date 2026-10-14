@@ -13,6 +13,7 @@ export default class UnivaultPlugin extends Plugin {
 	store!: StateStore;
 	orchestrator!: Orchestrator;
 	private saving: Promise<void> = Promise.resolve();
+	private notifying: Promise<SyncOutcome> | null = null;
 
 	async onload(): Promise<void> {
 		this.settings = readSettings(defaultSettings(Platform), await this.loadData());
@@ -47,8 +48,13 @@ export default class UnivaultPlugin extends Plugin {
 		this.store?.close();
 	}
 
+	// Calls that coalesce into a running sync share its promise and its single notice.
 	async syncNow(): Promise<SyncOutcome> {
-		const outcome = await this.orchestrator.sync("manual");
+		const run = this.orchestrator.sync("manual");
+		if (run === this.notifying) return run;
+		this.notifying = run;
+		const outcome = await run;
+		if (this.notifying === run) this.notifying = null;
 		new Notice(outcomeMessage(outcome));
 		return outcome;
 	}
