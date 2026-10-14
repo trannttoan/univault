@@ -152,6 +152,20 @@ describe("GitHubClient", () => {
 		expect((await caught(client.getRef(REPO, "other"))).code).toBe("not-found");
 	});
 
+	it("maps 409 on git data reads of an empty repository to not-found", async () => {
+		expect((await caught(client.getRef(REPO, "main"))).code).toBe("not-found");
+		expect((await caught(client.getTree(REPO, "a".repeat(40)))).code).toBe("not-found");
+		expect((await caught(client.getBlobStream(REPO, "a".repeat(40)))).code).toBe("not-found");
+		expect(github.requests.map((r) => r.status)).toEqual([409, 409, 409]);
+		expect((await caught(client.createBlob(REPO, new Uint8Array([1])))).code).toBe("unknown");
+	});
+
+	it("maps 404 from the contents api on a missing branch to not-found", async () => {
+		github.commitFiles(REPO, "main", { "a.md": "a" });
+		const put = client.putContents(REPO, "x.md", { branch: "nope", message: "m", bytes: new Uint8Array([1]) });
+		expect((await caught(put)).code).toBe("not-found");
+	});
+
 	it("writes a commit through blobs, trees, commits and a fast-forward ref update", async () => {
 		const parent = github.commitFiles(REPO, "main", { "keep.md": "keep" });
 		const bytes = new Uint8Array([...Array(256).keys(), 13, 10]);

@@ -6,8 +6,7 @@ const JSON_ACCEPT = "application/vnd.github+json";
 const RAW_ACCEPT = "application/vnd.github.raw+json";
 const MAX_READ_RETRIES = 3;
 const MAX_RETRY_AFTER_SECONDS = 60;
-// Not yet measured against the live API: GitHub documents 422 for a ref update
-// that is not a fast forward.
+// Measured 2026-10-14: a ref update that is not a fast forward returns 422.
 const NON_FAST_FORWARD_STATUS = 422;
 
 export interface GitHubClientOptions {
@@ -22,6 +21,8 @@ interface SendOptions {
 	accept?: string;
 	etag?: string | null;
 	conflictStatus?: number;
+	// Git Data reads on an empty repository return 409; treated like a missing branch.
+	emptyIsNotFound?: boolean;
 }
 
 export class GitHubClient {
@@ -52,7 +53,10 @@ export class GitHubClient {
 	}
 
 	async getRef(repo: string, branch: string, etag?: string | null): Promise<RefResult> {
-		const res = await this.send("GET", `${repoPath(repo)}/git/ref/heads/${segments(branch)}`, { etag });
+		const res = await this.send("GET", `${repoPath(repo)}/git/ref/heads/${segments(branch)}`, {
+			etag,
+			emptyIsNotFound: true,
+		});
 		if (res.status === 304) return { notModified: true };
 		const json = (await res.json()) as { object: { sha: string } };
 		return { notModified: false, sha: json.object.sha, etag: res.headers.get("etag") };
@@ -84,6 +88,7 @@ export class GitHubClient {
 		const json = await this.json<{ sha: string; truncated: boolean; tree: TreeEntry[] }>(
 			"GET",
 			`${repoPath(repo)}/git/trees/${sha}?recursive=1`,
+			{ emptyIsNotFound: true },
 		);
 		const entries = json.tree.map(({ path, mode, type, sha, size }) => ({
 			path,
@@ -96,7 +101,10 @@ export class GitHubClient {
 	}
 
 	async getBlobStream(repo: string, sha: string): Promise<ReadableStream<Uint8Array>> {
-		const res = await this.send("GET", `${repoPath(repo)}/git/blobs/${sha}`, { accept: RAW_ACCEPT });
+		const res = await this.send("GET", `${repoPath(repo)}/git/blobs/${sha}`, {
+			accept: RAW_ACCEPT,
+			emptyIsNotFound: true,
+		});
 		if (!res.body) throw new UnivaultError("unknown", { cause: new Error(`Blob ${sha} has no body`) });
 		return res.body;
 	}
@@ -168,13 +176,13 @@ export class GitHubClient {
 			if (res.ok || res.status === 304) return res;
 
 			const wait = isRead && attempt < MAX_READ_RETRIES ? retryDelay(res, attempt) : null;
-			if (wait === null) throw await this.toError(method, path, res, options.conflictStatus);
+			if (wait === null) throw await this.toError(method, path, res, options);
 			await res.body?.cancel();
 			await this.#sleep(wait);
 		}
 	}
 
-	private async toError(method: string, path: string, res: Response, conflictStatus?: number): Promise<UnivaultError> {
+	private async toError(method: string, path: string, res: Response, options: SendOptions): Promise<UnivaultError> {
 		let message = "";
 		try {
 			message = String(((await res.json()) as { message?: unknown }).message ?? "");
@@ -182,7 +190,7 @@ export class GitHubClient {
 			// Body is not JSON; the status alone is enough.
 		}
 		const cause = new Error(this.redact(`${method} ${path} returned ${res.status}${message ? `: ${message}` : ""}`));
-		return new UnivaultError(statusCode(res, conflictStatus), { cause });
+		return new UnivaultError(statusCode(res, options), { cause });
 	}
 
 	private redact(text: string): string {
@@ -190,8 +198,9 @@ export class GitHubClient {
 	}
 }
 
-function statusCode(res: Response, conflictStatus?: number): ErrorCode {
-	if (res.status === conflictStatus) return "conflict-retry";
+function statusCode(res: Response, options: SendOptions): ErrorCode {
+	if (res.status === options.conflictStatus) return "conflict-retry";
+	if (res.status === 409 && options.emptyIsNotFound) return "not-found";
 	if (res.status === 401) return "auth-expired";
 	if (isRateLimited(res)) return "rate-limited";
 	if (res.status === 403) return "forbidden";

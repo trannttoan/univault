@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 // In-memory GitHub REST fake, called through the same fetch signature the
 // client uses. Blob SHAs are real git ids; tree and commit SHAs are
-// deterministic stand-ins. Empty-repository responses are provisional.
+// deterministic stand-ins. Status codes follow the TRD's measured responses.
 
 type FileMap = Map<string, { mode: string; sha: string }>;
 
@@ -159,6 +159,7 @@ export class FakeGitHub {
 			method: "GET",
 			pattern: /^\/repos\/([^/]+)\/([^/]+)\/git\/trees\/([0-9a-f]{40})$/,
 			handle: (repo, m) => {
+				if (isEmpty(repo!)) return emptyRepo();
 				const tree = repo!.trees.get(m[3]);
 				if (!tree) return json(404, { message: "Not Found" });
 				return json(200, { sha: m[3], truncated: false, tree: listTree(repo!, tree) });
