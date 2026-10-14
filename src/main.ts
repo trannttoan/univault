@@ -9,6 +9,7 @@ import { ObsidianVaultAdapter } from "./vault/obsidian-adapter";
 
 export default class UnivaultPlugin extends Plugin {
 	settings!: UnivaultSettings;
+	private defaults!: UnivaultSettings;
 	session!: SessionStore;
 	store!: StateStore;
 	orchestrator!: Orchestrator;
@@ -16,7 +17,8 @@ export default class UnivaultPlugin extends Plugin {
 	private notifying: Promise<SyncOutcome> | null = null;
 
 	async onload(): Promise<void> {
-		this.settings = readSettings(defaultSettings(Platform), await this.loadData());
+		this.defaults = defaultSettings(Platform);
+		this.settings = readSettings(this.defaults, await this.loadData());
 		this.session = new SessionStore(this.app, (input, init) => fetch(input, init));
 		this.store = await StateStore.open(this.session.vaultId());
 		this.orchestrator = new Orchestrator({
@@ -62,7 +64,7 @@ export default class UnivaultPlugin extends Plugin {
 	// The orchestrator discards an anchor for another repository or branch at the next sync.
 	// Saves run one after another, so per-keystroke changes cannot land out of order.
 	updateSettings(change: Partial<UnivaultSettings>): Promise<void> {
-		this.settings = { ...this.settings, ...change };
+		this.settings = readSettings(this.defaults, { ...this.settings, ...change });
 		this.saving = this.saving
 			.then(() => this.saveData(this.settings))
 			.catch(() => {

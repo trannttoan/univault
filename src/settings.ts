@@ -31,10 +31,11 @@ export function defaultSettings(platform: {
 }
 
 // Only known preference keys are kept; nothing else from data.json survives.
+// A blank device name falls back to the platform default, since commits name it.
 export function readSettings(defaults: UnivaultSettings, data: unknown): UnivaultSettings {
 	const saved = (data ?? {}) as Partial<Record<keyof UnivaultSettings, unknown>>;
 	const pick = (key: keyof UnivaultSettings) => (typeof saved[key] === "string" ? (saved[key] as string) : defaults[key]);
-	return { repository: pick("repository"), branch: pick("branch"), deviceName: pick("deviceName") };
+	return { repository: pick("repository"), branch: pick("branch"), deviceName: pick("deviceName").trim() || defaults.deviceName };
 }
 
 export class UnivaultSettingTab extends PluginSettingTab {

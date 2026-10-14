@@ -2,6 +2,7 @@ import type { App, PluginManifest } from "obsidian";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import manifest from "../manifest.json";
 import UnivaultPlugin from "../src/main";
+import { readSettings } from "../src/settings";
 import { FakeGitHub } from "./fakes/github";
 import { App as FakeApp, type Plugin as FakePlugin, Notice } from "./fakes/obsidian";
 
@@ -57,6 +58,17 @@ describe("UnivaultPlugin", () => {
 
 	it("defaults to branch main and the platform as device name", () => {
 		expect(plugin.settings).toEqual({ repository: "", branch: "main", deviceName: "Mac" });
+	});
+
+	it("falls back to the platform device name when it is cleared", async () => {
+		await plugin.updateSettings({ deviceName: "Laptop" });
+		expect(plugin.settings.deviceName).toBe("Laptop");
+		await plugin.updateSettings({ deviceName: "" });
+		expect(plugin.settings.deviceName).toBe("Mac");
+		expect(fake.data).toMatchObject({ deviceName: "Mac" });
+
+		const defaults = { repository: "", branch: "main", deviceName: "Android" };
+		expect(readSettings(defaults, { deviceName: "  ", extra: "dropped" })).toEqual(defaults);
 	});
 
 	it("keeps the token out of the settings object and the settings file", async () => {
