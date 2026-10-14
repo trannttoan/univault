@@ -135,10 +135,12 @@ export class Orchestrator {
 		const indexed = sameOnBothSides(outcomes, local, remote);
 		const downloads = [...outcomes].filter(([, o]) => o === "download").map(([path]) => path);
 		for (const path of downloads) {
-			// The scan's stat guards edits made since the scan; paths the vault index never
-			// lists (dot-prefixed) are stat-ed just before their download instead.
-			const seen = scan.files.get(path) ?? (await vault.stat(path));
-			const expected = seen ? { mtime: seen.mtime, size: seen.size } : null;
+			// Expected stat: the scan's for listed files, else the one recorded at the last download
+			// (dot-prefixed paths, case-only collisions). A file on disk in neither conflicts.
+			// A path missing from disk was deleted locally: nothing to lose, phase 0 restores it.
+			const seen = scan.files.get(path) ?? index.get(path) ?? null;
+			const present = seen !== null && (scan.files.has(path) || (await vault.stat(path)) !== null);
+			const expected = seen && present ? { mtime: seen.mtime, size: seen.size } : null;
 			await download(client, repository, vault, path, (remote.get(path) as { sha: string }).sha, expected);
 		}
 		indexed.push(...(await this.downloadedEntries(downloads, remote)));

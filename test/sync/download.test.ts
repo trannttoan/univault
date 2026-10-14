@@ -74,6 +74,42 @@ describe("download cycle", () => {
 		expect(new TextDecoder().decode(h.vault.bytes(".gitignore"))).toBe("dist\n");
 	});
 
+	it("keeps a local edit to a dot-prefixed file instead of overwriting it", async () => {
+		await h.inSync({ "a.md": "a" });
+		h.github.commitFiles(REPO, "main", { ".gitignore": "node_modules\n" });
+		await h.orchestrator.sync("manual");
+		await h.vault.adapter.writeBinary(".gitignore", new TextEncoder().encode("node_modules\n.env\n").buffer);
+		h.github.commitFiles(REPO, "main", { ".gitignore": "dist\n" });
+		const anchor = await h.store.getAnchor();
+
+		const outcome = await h.orchestrator.sync("manual");
+
+		expect(outcome.kind === "failed" && outcome.error).toMatchObject({ code: "conflict-retry", paths: [".gitignore"] });
+		expect(new TextDecoder().decode(h.vault.bytes(".gitignore"))).toBe("node_modules\n.env\n");
+		expect(await h.store.getAnchor()).toEqual(anchor);
+	});
+
+	it("refuses to replace a file on disk that neither the scan nor the index knows", async () => {
+		await h.inSync({ "a.md": "a" });
+		await h.vault.adapter.writeBinary(".env", new TextEncoder().encode("SECRET=1").buffer);
+		h.github.commitFiles(REPO, "main", { ".env": "SECRET=remote" });
+
+		const outcome = await h.orchestrator.sync("manual");
+
+		expect(outcome.kind === "failed" && outcome.error).toMatchObject({ code: "conflict-retry", paths: [".env"] });
+		expect(new TextDecoder().decode(h.vault.bytes(".env"))).toBe("SECRET=1");
+		expect([...h.vault.files.keys()].sort()).toEqual([".env", "a.md"]);
+	});
+
+	it("restores a locally deleted file when the remote changed it", async () => {
+		await h.inSync({ "a.md": "a", "b.md": "b" });
+		h.vault.files.delete("b.md");
+		h.github.commitFiles(REPO, "main", { "b.md": "b from phone" });
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes("b.md"))).toBe("b from phone");
+	});
+
 	it.each(["../escape.md", ".obsidian/plugins/univault/main.js", ".OBSIDIAN/app.json"])(
 		"refuses %s with path-unsafe and writes nothing",
 		async (unsafe) => {
