@@ -1,5 +1,5 @@
 import type { GitHubClient } from "../github/client";
-import type { VaultAdapter } from "../vault/adapter";
+import type { VaultAdapter, VaultStat } from "../vault/adapter";
 
 // Streams the raw blob into the vault chunk by chunk; the file is replaced only once complete.
 export async function download(
@@ -8,6 +8,7 @@ export async function download(
 	vault: VaultAdapter,
 	path: string,
 	sha: string,
+	expected: VaultStat | null,
 ): Promise<void> {
-	await vault.writeChunked(path, await client.getBlobStream(repository, sha));
+	await vault.writeChunked(path, await client.getBlobStream(repository, sha), expected);
 }

@@ -1,4 +1,5 @@
-import type { VaultAdapter, VaultFile } from "./adapter";
+import { UnivaultError } from "../errors";
+import type { VaultAdapter, VaultFile, VaultStat } from "./adapter";
 
 export const TEMP_SUFFIX = ".univault-partial";
 
@@ -31,12 +32,12 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 		return new Uint8Array(await this.vault.adapter.readBinary(path));
 	}
 
-	async stat(path: string): Promise<{ mtime: number; size: number } | null> {
+	async stat(path: string): Promise<VaultStat | null> {
 		const stat = await this.vault.adapter.stat(path);
 		return stat?.type === "file" ? { mtime: stat.mtime, size: stat.size } : null;
 	}
 
-	async writeChunked(path: string, chunks: ReadableStream<Uint8Array>): Promise<void> {
+	async writeChunked(path: string, chunks: ReadableStream<Uint8Array>, expected: VaultStat | null): Promise<void> {
 		const { adapter } = this.vault;
 		const temp = path + TEMP_SUFFIX;
 		const slash = path.lastIndexOf("/");
@@ -47,11 +48,26 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 		for (;;) {
 			const { done, value } = await reader.read();
 			if (done) break;
-			await adapter.appendBinary(temp, toArrayBuffer(value));
+			try {
+				await adapter.appendBinary(temp, toArrayBuffer(value));
+			} catch (error) {
+				await reader.cancel().catch(() => {});
+				throw error;
+			}
+		}
+
+		// The user may have edited the target while it streamed; never overwrite that.
+		const current = await this.stat(path);
+		const unchanged = expected
+			? current?.mtime === expected.mtime && current.size === expected.size
+			: current === null && !(await adapter.exists(path));
+		if (!unchanged) {
+			await adapter.remove(temp);
+			throw new UnivaultError("conflict-retry", { cause: new Error("Changed during download"), paths: [path] });
 		}
 
 		// No atomic rename-over-existing in Obsidian's adapter: remove, then rename.
-		if (await adapter.exists(path)) await adapter.remove(path);
+		if (current) await adapter.remove(path);
 		await adapter.rename(temp, path);
 	}
 

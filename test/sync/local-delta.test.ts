@@ -22,7 +22,7 @@ describe("localDelta", () => {
 		const index = await indexOf(vault);
 		const hash = vi.fn(gitBlobSha);
 
-		const delta = await localDelta(new ObsidianVaultAdapter(vault), index, hash);
+		const { changes: delta } = await localDelta(new ObsidianVaultAdapter(vault), index, hash);
 
 		expect(delta.size).toBe(0);
 		expect(hash).not.toHaveBeenCalled();
@@ -38,7 +38,7 @@ describe("localDelta", () => {
 		vault.setFile("new.md", "hello");
 		vault.files.delete("gone.md");
 
-		const delta = await localDelta(new ObsidianVaultAdapter(vault), index);
+		const { changes: delta } = await localDelta(new ObsidianVaultAdapter(vault), index);
 
 		expect(Object.fromEntries([...delta].map(([path, change]) => [path, change.kind]))).toEqual({
 			"edit.md": "modified",
@@ -54,14 +54,14 @@ describe("localDelta", () => {
 		const index = await indexOf(vault);
 		vault.setFile("a.md", "same");
 
-		expect((await localDelta(new ObsidianVaultAdapter(vault), index)).size).toBe(0);
+		expect((await localDelta(new ObsidianVaultAdapter(vault), index)).changes.size).toBe(0);
 	});
 
 	it("keys by NFC and reads by the vault's own spelling", async () => {
 		const vault = new FakeVault();
 		vault.setFile("cafe\u0301.md", "x");
 
-		const delta = await localDelta(new ObsidianVaultAdapter(vault), new Map());
+		const { changes: delta } = await localDelta(new ObsidianVaultAdapter(vault), new Map());
 
 		expect([...delta.keys()]).toEqual(["caf\u00e9.md"]);
 		expect(delta.get("caf\u00e9.md")).toMatchObject({ kind: "added", vaultPath: "cafe\u0301.md" });

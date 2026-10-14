@@ -47,6 +47,10 @@ describe("download cycle", () => {
 		expect(new TextDecoder().decode(h.vault.bytes(".gitignore"))).toBe("node_modules\n");
 		expect((await h.store.getAnchor())?.commitSha).toBe(head);
 		expect((await h.store.getIndex()).has(".gitignore")).toBe(true);
+
+		h.github.commitFiles(REPO, "main", { ".gitignore": "dist\n" });
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes(".gitignore"))).toBe("dist\n");
 	});
 
 	it.each(["../escape.md", ".obsidian/plugins/univault/main.js", ".OBSIDIAN/app.json"])(

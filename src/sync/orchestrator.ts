@@ -128,7 +128,8 @@ export class Orchestrator {
 		}
 		if (!head) throw new UnivaultError("unknown", { cause: new Error("No head without an anchor") });
 
-		const local = await localDelta(vault, index);
+		const scan = await localDelta(vault, index);
+		const local = scan.changes;
 		const outcomes = classifyAll(local, remote);
 		const conflicts = [...outcomes].filter(([, o]) => o === "conflict").map(([path]) => path);
 		if (conflicts.length) throw new UnivaultError("conflict-retry", { paths: conflicts.sort() });
@@ -136,7 +137,11 @@ export class Orchestrator {
 		const indexed = sameOnBothSides(outcomes, local, remote);
 		const downloads = [...outcomes].filter(([, o]) => o === "download").map(([path]) => path);
 		for (const path of downloads) {
-			await download(client, repository, vault, path, (remote.get(path) as { sha: string }).sha);
+			// The scan's stat guards edits made since the scan; paths the vault index never
+			// lists (dot-prefixed) are stat-ed just before their download instead.
+			const seen = scan.files.get(path) ?? (await vault.stat(path));
+			const expected = seen ? { mtime: seen.mtime, size: seen.size } : null;
+			await download(client, repository, vault, path, (remote.get(path) as { sha: string }).sha, expected);
 		}
 		indexed.push(...(await this.downloadedEntries(downloads, remote)));
 
@@ -182,7 +187,7 @@ export class Orchestrator {
 	// through the contents api, which creates the branch with a root commit.
 	private async bootstrap(context: Context, index: Map<string, IndexEntry>): Promise<SyncOutcome | "rejected"> {
 		const { client, login, settings } = context;
-		const local = await localDelta(this.deps.vault, index);
+		const { changes: local } = await localDelta(this.deps.vault, index);
 		const files = [...local].filter(([, c]) => c.kind !== "deleted").sort(([a], [b]) => (a < b ? -1 : 1));
 		if (files.length === 0) return { kind: "remote-empty" };
 
