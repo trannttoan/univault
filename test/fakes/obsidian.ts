@@ -1,7 +1,10 @@
 // Runtime stand-in for the `obsidian` module, which ships types only.
 // Tests import the real types from "obsidian" and these classes from here.
 
+import { FakeVault } from "./vault";
+
 export class App {
+	readonly vault = new FakeVault();
 	readonly localStorage = new Map<string, unknown>();
 
 	loadLocalStorage(key: string): unknown {
@@ -34,8 +37,15 @@ export class FakeElement {
 	text = "";
 	type = "";
 
+	readonly classes: string[] = [];
+	readonly listeners = new Map<string, () => unknown>();
+
 	setText(text: string): void {
 		this.text = text;
+	}
+
+	addClass(name: string): void {
+		this.classes.push(name);
 	}
 
 	empty(): void {}
@@ -69,6 +79,10 @@ export class Plugin {
 	addCommand(command: Command): Command {
 		this.commands.push(command);
 		return command;
+	}
+
+	registerDomEvent(el: FakeElement, type: string, callback: () => unknown): void {
+		el.listeners.set(type, callback);
 	}
 
 	addSettingTab(tab: PluginSettingTab): void {

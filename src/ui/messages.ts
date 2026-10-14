@@ -1,4 +1,5 @@
 import type { ErrorCode } from "../errors";
+import type { SyncOutcome } from "../sync/orchestrator";
 
 const MESSAGES: Record<ErrorCode, string> = {
 	offline: "You're offline.",
@@ -15,4 +16,17 @@ const MESSAGES: Record<ErrorCode, string> = {
 
 export function errorMessage(code: ErrorCode): string {
 	return MESSAGES[code];
+}
+
+export function outcomeMessage(outcome: SyncOutcome): string {
+	switch (outcome.kind) {
+		case "needs-setup":
+			return "Univault: finish setup in settings (token, repository and branch).";
+		case "failed":
+			return `Univault: ${errorMessage(outcome.error.code)}`;
+		case "synced":
+			return outcome.uploaded + outcome.downloaded === 0
+				? "Univault: already in sync."
+				: `Univault: synced, ${outcome.uploaded} uploaded, ${outcome.downloaded} downloaded.`;
+	}
 }
