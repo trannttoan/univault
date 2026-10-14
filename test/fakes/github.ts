@@ -81,6 +81,11 @@ export class FakeGitHub {
 		return sha;
 	}
 
+	// Drops every ref, so the repository answers as empty, like one recreated on GitHub.
+	empty(name: string): void {
+		this.repo(name).refs.clear();
+	}
+
 	head(name: string, branch: string): string | undefined {
 		return this.repo(name).refs.get(branch);
 	}

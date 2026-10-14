@@ -160,6 +160,19 @@ describe("empty repository bootstrap", () => {
 		expect(h.github.requests.filter((r) => r.method === "PUT")).toHaveLength(0);
 	});
 
+	it("fails not-found without bootstrapping when a synced repository becomes empty", async () => {
+		await h.inSync({ "a.md": "a" });
+		const anchor = await h.store.getAnchor();
+		h.github.empty(REPO);
+
+		const outcome = await h.orchestrator.sync("manual");
+
+		expect(outcome.kind === "failed" && outcome.error.code).toBe("not-found");
+		expect(h.github.requests.map((r) => r.status)).toEqual([409]);
+		expect(h.github.requests.filter((r) => r.method === "PUT")).toHaveLength(0);
+		expect(await h.store.getAnchor()).toEqual(anchor);
+	});
+
 	it("does not bootstrap when the branch disappears after an anchor exists", async () => {
 		await h.inSync({ "a.md": "a" });
 		h.github.inject("GET", /git\/ref/, { status: 404 });
