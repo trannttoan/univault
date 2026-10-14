@@ -8,7 +8,7 @@ import type { VaultAdapter } from "../vault/adapter";
 import { canonicalizeRepoPath } from "../vault/paths";
 import { classifyAll } from "./classify";
 import { commitMessage, createSyncCommit } from "./commit";
-import { type LocalChange, localDelta } from "./local-delta";
+import { type LocalChange, type LocalScan, localDelta } from "./local-delta";
 import { type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
 
 export type SyncState = "idle" | "syncing" | "error";
@@ -128,7 +128,7 @@ export class Orchestrator {
 		}
 		if (!head) throw new UnivaultError("unknown", { cause: new Error("No head without an anchor") });
 
-		const scan = await localDelta(vault, index);
+		const scan = await this.scan(index);
 		const local = scan.changes;
 		const outcomes = classifyAll(local, remote);
 		const conflicts = [...outcomes].filter(([, o]) => o === "conflict").map(([path]) => path);
@@ -172,6 +172,15 @@ export class Orchestrator {
 		return { kind: "synced", uploaded: entries.length, downloaded: downloads.length };
 	}
 
+	// Over-cap files fail the sync by name, as an upload of them would.
+	private async scan(index: Map<string, IndexEntry>): Promise<LocalScan> {
+		const scan = await localDelta(this.deps.vault, index, this.deps.uploadCapBytes);
+		if (scan.oversized.length) {
+			throw new UnivaultError("unknown", { cause: new Error("Files over the upload cap"), paths: scan.oversized });
+		}
+		return scan;
+	}
+
 	// The ETag makes the next unchanged head check a free 304. It is kept only if the ref
 	// still points at our commit; an ETag for someone else's newer push would hide it.
 	private async etagFor(client: GitHubClient, repository: string, branch: string, sha: string): Promise<string | null> {
@@ -187,7 +196,7 @@ export class Orchestrator {
 	// through the contents api, which creates the branch with a root commit.
 	private async bootstrap(context: Context, index: Map<string, IndexEntry>): Promise<SyncOutcome | "rejected"> {
 		const { client, login, settings } = context;
-		const { changes: local } = await localDelta(this.deps.vault, index);
+		const { changes: local } = await this.scan(index);
 		const files = [...local].filter(([, c]) => c.kind !== "deleted").sort(([a], [b]) => (a < b ? -1 : 1));
 		if (files.length === 0) return { kind: "remote-empty" };
 
