@@ -34,12 +34,28 @@ describe("first sync without an anchor", () => {
 		const outcome = await h.orchestrator.sync("manual");
 
 		expect(outcome.kind === "failed" && outcome.error).toMatchObject({ code: "conflict-retry", paths: ["a.md", "c.md"] });
+		expect(outcomeMessage(outcome)).toContain("a.md, c.md");
 		expect(text(h.vault.bytes("a.md"))).toBe("local");
 		expect(text(h.vault.bytes("c.md"))).toBe("local c");
 		expect(h.github.head(REPO, "main")).toBe(head);
 		expect(h.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
 		expect(await h.store.getAnchor()).toBeNull();
 	});
+
+	it.each(["../escape.md", ".obsidian/plugins/univault/main.js"])(
+		"refuses %s from the full tree with path-unsafe and writes nothing",
+		async (unsafe) => {
+			h.github.commitFiles(REPO, "main", { "fine.md": "fine", [unsafe]: "evil" });
+			h.vault.setFile("local.md", "mine");
+
+			const outcome = await h.orchestrator.sync("manual");
+
+			expect(outcome.kind === "failed" && outcome.error.code).toBe("path-unsafe");
+			expect([...h.vault.files.keys()]).toEqual(["local.md"]);
+			expect(h.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
+			expect(await h.store.getAnchor()).toBeNull();
+		},
+	);
 
 	it("uploads local-only paths and downloads remote-only paths in one sync", async () => {
 		const remoteHead = h.github.commitFiles(REPO, "main", { "remote.md": "from repo" });

@@ -89,10 +89,24 @@ describe("upload cycle", () => {
 		h.vault.setFile("a.md", "after");
 		for (let i = 0; i < 4; i++) h.github.inject("PATCH", /git\/refs/, { status: 422 });
 
+		const index = await h.store.getIndex();
 		const outcome = await h.orchestrator.sync("manual");
 		expect(outcome.kind === "failed" && outcome.error.code).toBe("conflict-retry");
 		expect(h.github.requests.filter((r) => r.method === "PATCH")).toHaveLength(4);
 		expect(await h.store.getAnchor()).toEqual(anchor);
+		expect(await h.store.getIndex()).toEqual(index);
+	});
+
+	it("refuses an upload when GitHub's blob id differs from the local hash", async () => {
+		const head = await h.inSync({ "a.md": "before" });
+		h.vault.setFile("a.md", "after");
+		h.github.inject("POST", /\/git\/blobs$/, { status: 201, body: { sha: "f".repeat(40) } });
+
+		const outcome = await h.orchestrator.sync("manual");
+
+		expect(outcome.kind === "failed" && outcome.error).toMatchObject({ code: "unknown", paths: ["a.md"] });
+		expect(h.github.requests.filter((r) => r.path.endsWith("/git/commits") || r.method === "PATCH")).toHaveLength(0);
+		expect(h.github.head(REPO, "main")).toBe(head);
 	});
 
 	it("refuses a file over the upload cap and names it", async () => {
