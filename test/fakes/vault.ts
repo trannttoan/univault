@@ -8,6 +8,7 @@ interface StoredFile {
 // In-memory stand-in for Obsidian's Vault and its DataAdapter.
 export class FakeVault implements VaultLike {
 	readonly files = new Map<string, StoredFile>();
+	readonly configDir = ".obsidian";
 	readonly folders = new Set<string>([""]);
 	readonly appendCalls: string[] = [];
 	private clock = 1_000;
@@ -51,7 +52,10 @@ export class FakeVault implements VaultLike {
 			this.files.set(newPath, this.require(path));
 			this.files.delete(path);
 		},
-		mkdir: async (path) => this.addParents(`${path}/x`),
+		mkdir: async (path) => {
+			this.requireParent(path);
+			this.folders.add(path);
+		},
 	};
 
 	private require(path: string): StoredFile {

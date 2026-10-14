@@ -54,7 +54,11 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 	}
 
 	async ensureFolder(path: string): Promise<void> {
-		if (!(await this.vault.adapter.exists(path))) await this.vault.adapter.mkdir(path);
+		const parts = path.split("/");
+		for (let i = 1; i <= parts.length; i++) {
+			const folder = parts.slice(0, i).join("/");
+			if (!(await this.vault.adapter.exists(folder))) await this.vault.adapter.mkdir(folder);
+		}
 	}
 
 	async removeTempFiles(): Promise<void> {
