@@ -165,8 +165,20 @@ export class Orchestrator {
 			if (error instanceof UnivaultError && error.code === "conflict-retry") return "rejected";
 			throw error;
 		}
-		await store.advance({ repository, branch, ...commit, refEtag: null }, [...entries, ...indexed]);
+		const refEtag = await this.etagFor(client, repository, branch, commit.commitSha);
+		await store.advance({ repository, branch, ...commit, refEtag }, [...entries, ...indexed]);
 		return { kind: "synced", uploaded: entries.length, downloaded: downloads.length };
+	}
+
+	// The ETag makes the next unchanged head check a free 304. It is kept only if the ref
+	// still points at our commit; an ETag for someone else's newer push would hide it.
+	private async etagFor(client: GitHubClient, repository: string, branch: string, sha: string): Promise<string | null> {
+		try {
+			const ref = await client.getRef(repository, branch);
+			return !ref.notModified && ref.sha === sha ? ref.etag : null;
+		} catch {
+			return null;
+		}
 	}
 
 	// No branch to read: an empty repository, or a branch missing from a non-empty one.

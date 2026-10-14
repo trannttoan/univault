@@ -57,7 +57,7 @@ describe("first sync without an anchor", () => {
 		h.github.requests.length = 0;
 		await h.orchestrator.sync("manual");
 		await h.orchestrator.sync("manual");
-		expect(h.github.requests.map((r) => r.status)).toEqual([200, 304]);
+		expect(h.github.requests.map((r) => r.status)).toEqual([304, 304]);
 	});
 
 	it("starts over after the repository changes in settings", async () => {

@@ -22,6 +22,34 @@ describe("Orchestrator", () => {
 		expect(h.orchestrator.lastSyncAt).not.toBeNull();
 	});
 
+	it("follows an upload with a no-op sync that is exactly one 304", async () => {
+		await h.inSync({ "a.md": "before" });
+		h.vault.setFile("a.md", "after");
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", uploaded: 1 });
+
+		h.github.requests.length = 0;
+		expect(await h.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
+		expect(h.github.requests).toEqual([{ method: "GET", path: `/repos/${REPO}/git/ref/heads/main`, status: 304 }]);
+	});
+
+	it("keeps no ETag when another device pushes right after our ref update", async () => {
+		await h.inSync({ "a.md": "before" });
+		h.vault.setFile("a.md", "after");
+		let pushed = false;
+		h.github.onRequest = (method, path) => {
+			if (method === "GET" && path.includes("/git/ref/") && h.github.requests.some((r) => r.method === "PATCH") && !pushed) {
+				pushed = true;
+				h.github.commitFiles(REPO, "main", { "b.md": "from phone" });
+			}
+		};
+		await h.orchestrator.sync("manual");
+		expect((await h.store.getAnchor())?.refEtag).toBeNull();
+
+		h.github.onRequest = null;
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes("b.md"))).toBe("from phone");
+	});
+
 	it("stores a fresh ref ETag when the head matches the anchor without one", async () => {
 		await h.inSync({ "a.md": "a" });
 		const anchor = (await h.store.getAnchor())!;
