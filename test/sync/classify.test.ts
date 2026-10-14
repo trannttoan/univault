@@ -23,33 +23,34 @@ const R: Record<string, RemoteChange | undefined> = {
 	removed: { kind: "removed" },
 };
 
+// Rows are local changes, columns remote changes, in the order of L and R.
+const WITH_ANCHOR: Record<string, Outcome[]> = {
+	none: ["noop", "download", "download", "download", "download", "noop"],
+	"added A": ["upload", "noop", "conflict", "noop", "conflict", "upload"],
+	"modified A": ["upload", "noop", "conflict", "noop", "conflict", "upload"],
+	deleted: ["noop", "download", "download", "download", "download", "noop"],
+};
+
 describe("classify with an anchor", () => {
-	const table: [string, string, Outcome][] = [
-		["none", "none", "noop"],
-		["none", "added A", "download"],
-		["none", "modified B", "download"],
-		["none", "removed", "noop"],
-		["added A", "none", "upload"],
-		["added A", "added A", "noop"],
-		["added A", "added B", "conflict"],
-		["added A", "removed", "upload"],
-		["modified A", "none", "upload"],
-		["modified A", "modified A", "noop"],
-		["modified A", "modified B", "conflict"],
-		["modified A", "removed", "upload"],
-		["deleted", "none", "noop"],
-		["deleted", "modified B", "download"],
-		["deleted", "removed", "noop"],
-	];
+	const table = Object.keys(L).flatMap((l) => Object.keys(R).map((r, i) => [l, r, WITH_ANCHOR[l]?.[i]] as const));
+
+	it("covers every (local, remote) pair", () => {
+		expect(table).toHaveLength(Object.keys(L).length * Object.keys(R).length);
+		expect(table.every(([, , expected]) => expected !== undefined)).toBe(true);
+	});
+
 	it.each(table)("local %s, remote %s → %s", (l, r, expected) => {
 		expect(classify(L[l], R[r])).toBe(expected);
 	});
 });
 
+// Without an anchor each side only ever reports "added".
 describe("classify without an anchor", () => {
 	const table: [string, string, Outcome][] = [
-		["added A", "none", "upload"],
+		["none", "none", "noop"],
 		["none", "added A", "download"],
+		["none", "added B", "download"],
+		["added A", "none", "upload"],
 		["added A", "added A", "noop"],
 		["added A", "added B", "conflict"],
 	];
