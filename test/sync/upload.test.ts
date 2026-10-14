@@ -69,6 +69,20 @@ describe("upload cycle", () => {
 		expect((await h.store.getAnchor())?.commitSha).toBe(head);
 	});
 
+	it("downloads the other device's change during the re-run and commits on top of it", async () => {
+		await h.inSync({ "a.md": "before", "b.md": "b" });
+		h.vault.setFile("a.md", "after");
+		let other: string | undefined;
+		h.github.onRequest = (method) => {
+			if (method === "PATCH" && !other) other = h.github.commitFiles(REPO, "main", { "b.md": "b from phone" });
+		};
+
+		expect(await h.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 1, downloaded: 1 });
+		expect(h.github.commit(REPO, h.github.head(REPO, "main")!)?.parents).toEqual([other]);
+		expect(new TextDecoder().decode(h.vault.bytes("b.md"))).toBe("b from phone");
+		expect(new TextDecoder().decode(h.github.file(REPO, "main", "a.md"))).toBe("after");
+	});
+
 	it("surfaces conflict-retry on the fourth rejection and leaves the anchor alone", async () => {
 		await h.inSync({ "a.md": "before" });
 		const anchor = await h.store.getAnchor();

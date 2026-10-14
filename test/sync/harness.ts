@@ -51,6 +51,8 @@ export async function createHarness() {
 		store,
 		vault: new ObsidianVaultAdapter(vault),
 		uploadCapBytes: 1024,
+		configDir: ".obsidian",
+		pluginDir: ".obsidian/plugins/univault",
 	});
 	h.orchestrator.onChange(() => h.states.push(h.orchestrator.state));
 	return h;

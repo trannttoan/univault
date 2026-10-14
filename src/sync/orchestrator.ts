@@ -2,12 +2,14 @@ import { UnivaultError } from "../errors";
 import type { GitHubClient } from "../github/client";
 import type { UnivaultSettings } from "../settings";
 import type { IndexEntry, StateStore, SyncAnchor } from "../store/db";
+import { download } from "../transfer/download";
 import { uploadBlob } from "../transfer/upload";
 import type { VaultAdapter } from "../vault/adapter";
+import { canonicalizeRepoPath, normalizeVaultPath } from "../vault/paths";
 import { classifyAll } from "./classify";
 import { commitMessage, createSyncCommit } from "./commit";
 import { type LocalChange, localDelta } from "./local-delta";
-import { type RemoteChange, checkHead } from "./remote-delta";
+import { type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
 
 export type SyncState = "idle" | "syncing" | "error";
 
@@ -22,6 +24,8 @@ export interface OrchestratorDeps {
 	store: StateStore;
 	vault: VaultAdapter;
 	uploadCapBytes: number;
+	configDir: string;
+	pluginDir: string;
 }
 
 interface Context {
@@ -105,27 +109,33 @@ export class Orchestrator {
 		}
 		if (!anchor) throw notYet("first sync without an anchor");
 
+		const index = await store.getIndex();
 		let head = { commitSha: anchor.commitSha, treeSha: anchor.treeSha };
 		let remote = new Map<string, RemoteChange>();
 		const check = await checkHead(client, repository, branch, anchor);
 		if (check.kind === "changed") {
 			head = { commitSha: check.sha, treeSha: (await client.getCommit(repository, check.sha)).treeSha };
-			remote = await this.compare(client, repository, anchor, check.sha);
+			const canonical = (path: string) => canonicalizeRepoPath(path, this.deps.configDir, this.deps.pluginDir);
+			remote = await remoteDelta(client, repository, anchor, head, index, canonical);
 		}
 
-		const local = await localDelta(vault, await store.getIndex());
+		const local = await localDelta(vault, index);
 		const outcomes = classifyAll(local, remote);
 		const conflicts = [...outcomes].filter(([, o]) => o === "conflict").map(([path]) => path);
 		if (conflicts.length) throw new UnivaultError("conflict-retry", { paths: conflicts.sort() });
-		if ([...outcomes.values()].includes("download")) throw notYet("downloading remote changes");
+
+		const indexed = sameOnBothSides(outcomes, local, remote);
+		const downloads = [...outcomes].filter(([, o]) => o === "download").map(([path]) => path);
+		for (const path of downloads) {
+			await download(client, repository, vault, path, (remote.get(path) as { sha: string }).sha);
+		}
+		indexed.push(...(await this.downloadedEntries(downloads, remote)));
 
 		const uploads = [...outcomes].filter(([, o]) => o === "upload").map(([path]) => path);
-		const indexed = sameOnBothSides(outcomes, local, remote);
-
 		if (uploads.length === 0) {
 			const next: SyncAnchor = { ...anchor, ...head, refEtag: check.etag };
 			if (check.kind === "changed" || check.etag !== anchor.refEtag || indexed.length) await store.advance(next, indexed);
-			return { kind: "synced", uploaded: 0, downloaded: 0 };
+			return { kind: "synced", uploaded: 0, downloaded: downloads.length };
 		}
 
 		const entries: IndexEntry[] = [];
@@ -144,23 +154,18 @@ export class Orchestrator {
 			throw error;
 		}
 		await store.advance({ repository, branch, ...commit, refEtag: null }, [...entries, ...indexed]);
-		return { kind: "synced", uploaded: entries.length, downloaded: 0 };
+		return { kind: "synced", uploaded: entries.length, downloaded: downloads.length };
 	}
 
-	private async compare(
-		client: GitHubClient,
-		repository: string,
-		anchor: SyncAnchor,
-		headSha: string,
-	): Promise<Map<string, RemoteChange>> {
-		const { files } = await client.getCompare(repository, anchor.commitSha, headSha);
-		const remote = new Map<string, RemoteChange>();
-		for (const file of files) {
-			if (file.status === "added" || file.status === "modified") {
-				remote.set(file.filename, { kind: file.status, sha: file.sha });
-			}
-		}
-		return remote;
+	private async downloadedEntries(paths: string[], remote: Map<string, RemoteChange>): Promise<IndexEntry[]> {
+		if (paths.length === 0) return [];
+		const stats = new Map((await this.deps.vault.list()).map((file) => [normalizeVaultPath(file.path), file]));
+		return paths.map((path) => {
+			const stat = stats.get(path);
+			if (!stat) throw new UnivaultError("unknown", { cause: new Error("Downloaded file is missing"), paths: [path] });
+			const sha = (remote.get(path) as { sha: string }).sha;
+			return { path, mtime: stat.mtime, size: stat.size, blobSha: sha, mode: FILE_MODE };
+		});
 	}
 
 	private setState(state: SyncState): void {
@@ -185,7 +190,7 @@ function sameOnBothSides(
 	return entries;
 }
 
-// Transitional: downloads and first sync arrive with the next slices.
+// Transitional: first sync arrives with the next slice.
 function notYet(what: string): UnivaultError {
 	return new UnivaultError("unknown", { cause: new Error(`Not implemented yet: ${what}`) });
 }

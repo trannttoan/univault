@@ -184,7 +184,8 @@ export class FakeGitHub {
 				const base = repo!.commits.get(m[3]);
 				const head = repo!.commits.get(m[4]);
 				if (!base || !head) return json(404, { message: "Not Found" });
-				return json(200, { status: compareStatus(repo!, m[3], m[4]), files: diffTrees(repo!, base.tree, head.tree) });
+				const files = diffTrees(repo!, base.tree, head.tree).slice(0, 300);
+				return json(200, { status: compareStatus(repo!, m[3], m[4]), files });
 			},
 		},
 		{
