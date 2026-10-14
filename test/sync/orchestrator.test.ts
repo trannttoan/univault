@@ -32,6 +32,27 @@ describe("Orchestrator", () => {
 		expect(h.github.requests).toEqual([{ method: "GET", path: `/repos/${REPO}/git/ref/heads/main`, status: 304 }]);
 	});
 
+	it("still finishes when the ETag read after the push fails", async () => {
+		await h.inSync({ "a.md": "before" });
+		h.vault.setFile("a.md", "after");
+		let pushed = false;
+		let refReadsAfterPush = 0;
+		h.github.onRequest = (method, path) => {
+			if (pushed && method === "GET" && path.includes("/git/ref/")) refReadsAfterPush++;
+			if (method !== "PATCH") return;
+			pushed = true;
+			for (let i = 0; i < 4; i++) h.github.inject("GET", /\/git\/ref\//, "network");
+		};
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", uploaded: 1 });
+		expect(refReadsAfterPush).toBe(4);
+
+		const head = h.github.head(REPO, "main");
+		expect(await h.store.getAnchor()).toMatchObject({ commitSha: head, refEtag: null });
+		expect((await h.store.getIndex()).get("a.md")?.size).toBe(5);
+		expect(h.github.requests.filter((r) => r.method === "PATCH").map((r) => r.status)).toEqual([200]);
+	});
+
 	it("keeps no ETag when another device pushes right after our ref update", async () => {
 		await h.inSync({ "a.md": "before" });
 		h.vault.setFile("a.md", "after");
