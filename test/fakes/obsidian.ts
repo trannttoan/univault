@@ -1,7 +1,28 @@
 // Runtime stand-in for the `obsidian` module, which ships types only.
 // Tests import the real types from "obsidian" and these classes from here.
 
-export class App {}
+export class App {
+	readonly localStorage = new Map<string, unknown>();
+
+	loadLocalStorage(key: string): unknown {
+		return this.localStorage.has(key) ? structuredClone(this.localStorage.get(key)) : null;
+	}
+
+	saveLocalStorage(key: string, data: unknown): void {
+		if (data === null) this.localStorage.delete(key);
+		else this.localStorage.set(key, structuredClone(data));
+	}
+}
+
+export const Platform = {
+	isAndroidApp: false,
+	isIosApp: false,
+	isMacOS: true,
+	isWin: false,
+	isLinux: false,
+	isMobile: false,
+	isDesktop: true,
+};
 
 export interface Command {
 	id: string;
@@ -11,15 +32,28 @@ export interface Command {
 
 export class FakeElement {
 	text = "";
+	type = "";
 
 	setText(text: string): void {
 		this.text = text;
+	}
+
+	empty(): void {}
+}
+
+export class Notice {
+	static readonly shown: string[] = [];
+
+	constructor(readonly message: string) {
+		Notice.shown.push(message);
 	}
 }
 
 export class Plugin {
 	readonly statusBarItems: FakeElement[] = [];
 	readonly commands: Command[] = [];
+	readonly settingTabs: PluginSettingTab[] = [];
+	data: unknown = null;
 
 	constructor(
 		readonly app: App,
@@ -35,5 +69,33 @@ export class Plugin {
 	addCommand(command: Command): Command {
 		this.commands.push(command);
 		return command;
+	}
+
+	addSettingTab(tab: PluginSettingTab): void {
+		this.settingTabs.push(tab);
+	}
+
+	async loadData(): Promise<unknown> {
+		return structuredClone(this.data);
+	}
+
+	async saveData(data: unknown): Promise<void> {
+		this.data = structuredClone(data);
+	}
+}
+
+export class PluginSettingTab {
+	readonly containerEl = new FakeElement();
+
+	constructor(
+		readonly app: App,
+		readonly plugin: Plugin,
+	) {}
+}
+
+// Accepts any chained builder call and ignores it.
+export class Setting {
+	constructor(readonly containerEl: unknown) {
+		return new Proxy(this, { get: (target, key) => (key in target ? Reflect.get(target, key) : () => target) });
 	}
 }
