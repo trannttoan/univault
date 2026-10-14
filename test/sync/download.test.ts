@@ -100,7 +100,17 @@ describe("download cycle", () => {
 		expect((await h.store.getAnchor())?.commitSha).toBe(head);
 	});
 
-	it("falls back to the recursive tree when compare lists 300 files", async () => {
+	it("falls back to the recursive tree when the anchor commit is gone", async () => {
+		await h.inSync({ "a.md": "a" });
+		h.github.commitFiles(REPO, "main", { "b.md": "b" });
+		h.github.inject("GET", /\/compare\//, { status: 404 });
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(h.github.requests.some((r) => r.path.includes("/git/trees/"))).toBe(true);
+		expect(new TextDecoder().decode(h.vault.bytes("b.md"))).toBe("b");
+	});
+
+	it("falls back to the recursive tree when compare lists when compare lists 300 files", async () => {
 		await h.inSync({ "a.md": "a" });
 		const files = Object.fromEntries(Array.from({ length: 301 }, (_, i) => [`bulk/n${i}.md`, `note ${i}`]));
 		h.github.commitFiles(REPO, "main", files);

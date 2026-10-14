@@ -33,8 +33,11 @@ export async function remoteDelta(
 	canonical: (path: string) => string,
 ): Promise<Map<string, RemoteChange>> {
 	const delta = new Map<string, RemoteChange>();
-	if (anchor) {
-		const compare = await client.getCompare(repository, anchor.commitSha, head.commitSha);
+	// An anchor commit that no longer exists (history rewritten) reads as not-found: use the tree.
+	const compare = anchor
+		? await client.getCompare(repository, anchor.commitSha, head.commitSha).catch(notFoundAsNull)
+		: null;
+	if (compare) {
 		if (compare.status === "ahead" && compare.files.length < COMPARE_FILE_LIMIT) {
 			// renamed, copied and changed all leave content at `filename`.
 			for (const file of compare.files) {
@@ -55,4 +58,9 @@ export async function remoteDelta(
 		if (known?.blobSha !== entry.sha) delta.set(path, { kind: known ? "modified" : "added", sha: entry.sha });
 	}
 	return delta;
+}
+
+function notFoundAsNull(error: unknown): null {
+	if (error instanceof UnivaultError && error.code === "not-found") return null;
+	throw error;
 }
