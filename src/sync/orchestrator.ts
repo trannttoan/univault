@@ -41,7 +41,6 @@ const FILE_MODE = "100644";
 
 export class Orchestrator {
 	state: SyncState = "idle";
-	lastOutcome: SyncOutcome | null = null;
 	lastSyncAt: Date | null = null;
 	private current: Promise<SyncOutcome> | null = null;
 	private again = false;
@@ -71,7 +70,6 @@ export class Orchestrator {
 			this.again = false;
 			this.setState("syncing");
 			outcome = await this.runOnce();
-			this.lastOutcome = outcome;
 			const ok = outcome.kind === "synced" || outcome.kind === "remote-empty";
 			if (ok) this.lastSyncAt = new Date();
 			this.setState(ok ? "idle" : "error");

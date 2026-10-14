@@ -18,7 +18,6 @@ export interface VaultAdapter {
 	// if the target still matches `expected` (null: it did not exist).
 	writeChunked(path: string, chunks: ReadableStream<Uint8Array>, expected: VaultStat | null): Promise<void>;
 	exists(path: string): Promise<boolean>;
-	ensureFolder(path: string): Promise<void>;
 	// Removes temporary files left behind by an interrupted writeChunked.
 	removeTempFiles(): Promise<void>;
 }

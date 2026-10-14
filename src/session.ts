@@ -1,7 +1,7 @@
 import { UnivaultError } from "./errors";
 import { GitHubClient } from "./github/client";
 
-export const GITHUB_HOST = "https://api.github.com";
+const GITHUB_HOST = "https://api.github.com";
 const SESSION_KEY = "univault-session";
 const VAULT_ID_KEY = "univault-vault-id";
 
@@ -44,10 +44,6 @@ export class SessionStore {
 		const session: Session = { host: GITHUB_HOST, login, accessToken, authKind: "pat" };
 		this.storage.saveLocalStorage(SESSION_KEY, session);
 		return login;
-	}
-
-	signOut(): void {
-		this.storage.saveLocalStorage(SESSION_KEY, null);
 	}
 
 	// Hands out a ready client so callers never receive the token itself.

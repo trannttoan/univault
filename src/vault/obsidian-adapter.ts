@@ -76,7 +76,7 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 		return this.vault.adapter.exists(path);
 	}
 
-	async ensureFolder(path: string): Promise<void> {
+	private async ensureFolder(path: string): Promise<void> {
 		const parts = path.split("/");
 		for (let i = 1; i <= parts.length; i++) {
 			const folder = parts.slice(0, i).join("/");

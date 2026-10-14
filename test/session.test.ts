@@ -47,13 +47,6 @@ describe("SessionStore", () => {
 		expect(JSON.stringify(handle)).not.toContain(TOKEN);
 	});
 
-	it("forgets the session on sign out", async () => {
-		const session = new SessionStore(app, github.fetch);
-		await session.signInWithToken(TOKEN);
-		session.signOut();
-		expect(session.login()).toBeNull();
-	});
-
 	it("keeps the vault id stable across reloads", () => {
 		const id = new SessionStore(app, github.fetch).vaultId();
 		expect(id).toMatch(/^[0-9a-f-]{36}$/);
