@@ -77,6 +77,39 @@ describe("ObsidianVaultAdapter.writeChunked", () => {
 		expect(cancel).toHaveBeenCalledOnce();
 	});
 
+	it("cancels the stream when the temp file cannot be created", async () => {
+		const vault = new FakeVault();
+		vault.adapter.writeBinary = async () => {
+			throw new Error("read-only");
+		};
+		const cancel = vi.fn();
+		const stream = new ReadableStream<Uint8Array>({ pull: (c) => c.enqueue(enc("x")), cancel });
+
+		await expect(new ObsidianVaultAdapter(vault).writeChunked("a/note.md", stream, null)).rejects.toThrow("read-only");
+		expect(cancel).toHaveBeenCalledOnce();
+	});
+
+	it("reports the conflict even when the temp file cannot be removed", async () => {
+		const vault = new FakeVault();
+		const adapter = new ObsidianVaultAdapter(vault);
+		const stream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				vault.setFile("new.md", "made locally");
+				controller.enqueue(enc("remote"));
+				controller.close();
+			},
+		});
+		vault.adapter.remove = async () => {
+			throw new Error("busy");
+		};
+
+		await expect(adapter.writeChunked("new.md", stream, null)).rejects.toMatchObject({
+			code: "conflict-retry",
+			paths: ["new.md"],
+		});
+		expect(new TextDecoder().decode(vault.bytes("new.md"))).toBe("made locally");
+	});
+
 	it("keeps an edit made while the download streamed and removes the temp file", async () => {
 		const vault = new FakeVault();
 		vault.setFile("note.md", "original");

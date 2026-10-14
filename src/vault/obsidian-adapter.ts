@@ -42,9 +42,13 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 		const { adapter } = this.vault;
 		const temp = path + TEMP_SUFFIX;
 		const slash = path.lastIndexOf("/");
-		if (slash > 0) await this.ensureFolder(path.slice(0, slash));
-
-		await adapter.writeBinary(temp, new ArrayBuffer(0));
+		try {
+			if (slash > 0) await this.ensureFolder(path.slice(0, slash));
+			await adapter.writeBinary(temp, new ArrayBuffer(0));
+		} catch (error) {
+			await chunks.cancel().catch(() => {});
+			throw error;
+		}
 		const reader = chunks.getReader();
 		for (;;) {
 			const { done, value } = await reader.read();
@@ -63,7 +67,8 @@ export class ObsidianVaultAdapter implements VaultAdapter {
 			? current?.mtime === expected.mtime && current.size === expected.size
 			: current === null && !(await adapter.exists(path));
 		if (!unchanged) {
-			await adapter.remove(temp);
+			// Cleanup is best effort; the conflict is what the caller must see.
+			await adapter.remove(temp).catch(() => {});
 			throw new UnivaultError("conflict-retry", { cause: new Error("Changed during download"), paths: [path] });
 		}
 
