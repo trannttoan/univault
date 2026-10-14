@@ -12,6 +12,7 @@ export default class UnivaultPlugin extends Plugin {
 	session!: SessionStore;
 	store!: StateStore;
 	orchestrator!: Orchestrator;
+	private saving: Promise<void> = Promise.resolve();
 
 	async onload(): Promise<void> {
 		this.settings = readSettings(defaultSettings(Platform), await this.loadData());
@@ -53,8 +54,14 @@ export default class UnivaultPlugin extends Plugin {
 	}
 
 	// The orchestrator discards an anchor for another repository or branch at the next sync.
-	async updateSettings(change: Partial<UnivaultSettings>): Promise<void> {
+	// Saves run one after another, so per-keystroke changes cannot land out of order.
+	updateSettings(change: Partial<UnivaultSettings>): Promise<void> {
 		this.settings = { ...this.settings, ...change };
-		await this.saveData(this.settings);
+		this.saving = this.saving
+			.then(() => this.saveData(this.settings))
+			.catch(() => {
+				new Notice("Univault: couldn't save settings.");
+			});
+		return this.saving;
 	}
 }

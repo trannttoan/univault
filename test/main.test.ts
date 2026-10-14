@@ -54,6 +54,32 @@ describe("UnivaultPlugin", () => {
 		expect(JSON.stringify([...app.localStorage.values()])).toContain(TOKEN);
 	});
 
+	it("saves settings one at a time, ending with the latest values", async () => {
+		const order: string[] = [];
+		const save = fake.saveData.bind(fake);
+		vi.spyOn(fake, "saveData").mockImplementation(async (data) => {
+			const { repository } = data as { repository: string };
+			await new Promise((resolve) => setTimeout(resolve, repository === "o/a" ? 5 : 0));
+			order.push(repository);
+			await save(data);
+		});
+
+		void plugin.updateSettings({ repository: "o/a" });
+		await plugin.updateSettings({ repository: "o/ab" });
+
+		expect(order).toEqual(["o/ab", "o/ab"]);
+		expect(fake.data).toMatchObject({ repository: "o/ab" });
+	});
+
+	it("shows a notice instead of rejecting when a save fails", async () => {
+		vi.spyOn(fake, "saveData").mockRejectedValueOnce(new Error("disk full"));
+		const before = Notice.shown.length;
+		await expect(plugin.updateSettings({ deviceName: "Phone" })).resolves.toBeUndefined();
+		expect(Notice.shown.slice(before)).toEqual(["Univault: couldn't save settings."]);
+		await plugin.updateSettings({ deviceName: "Phone 2" });
+		expect(fake.data).toMatchObject({ deviceName: "Phone 2" });
+	});
+
 	it("discards the anchor at the next sync after the repository changes", async () => {
 		github.createRepo("octo/other");
 		const head = github.commitFiles("octo/other", "main", { "other.md": "o" });
