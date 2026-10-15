@@ -1,0 +1,182 @@
+import { describe, expect, it, vi } from "vitest";
+import { ObsidianVaultAdapter } from "../../src/vault/obsidian-adapter";
+import { TEMP_SUFFIX } from "../../src/vault/paths";
+import { FakeVault } from "../fakes/vault";
+
+function streamOf(chunks: Uint8Array[], failAfter?: number): ReadableStream<Uint8Array> {
+	let i = 0;
+	return new ReadableStream({
+		pull(controller) {
+			if (failAfter !== undefined && i === failAfter) controller.error(new Error("network dropped"));
+			else if (i < chunks.length) controller.enqueue(chunks[i++]);
+			else controller.close();
+		},
+	});
+}
+
+const enc = (s: string) => new TextEncoder().encode(s);
+
+describe("ObsidianVaultAdapter.removeTempFiles", () => {
+	it("removes temp files anywhere on disk except the config directory", async () => {
+		const vault = new FakeVault();
+		vault.setFile("note.md", "keep");
+		vault.setFile(`deep/a.md${TEMP_SUFFIX}`, "x");
+		vault.setFile(`.github/ci.yml${TEMP_SUFFIX}`, "x");
+		vault.setFile(`.obsidian/plugins/other/data.json${TEMP_SUFFIX}`, "theirs");
+
+		await new ObsidianVaultAdapter(vault).removeTempFiles();
+
+		expect([...vault.files.keys()].sort()).toEqual([".obsidian/plugins/other/data.json.univault-partial", "note.md"]);
+	});
+
+	it("never lists or touches a .git folder at any depth", async () => {
+		const vault = new FakeVault();
+		vault.setFile(`.git/objects/ab/cd${TEMP_SUFFIX}`, "git's");
+		vault.setFile(`sub/repo/.git/HEAD${TEMP_SUFFIX}`, "git's too");
+		vault.setFile(`sub/x.md${TEMP_SUFFIX}`, "ours");
+		const list = vi.spyOn(vault.adapter, "list");
+
+		await new ObsidianVaultAdapter(vault).removeTempFiles();
+
+		expect(list.mock.calls.map(([path]) => path).filter((p) => p.split("/").includes(".git"))).toEqual([]);
+		expect([...vault.files.keys()].sort()).toEqual([`.git/objects/ab/cd${TEMP_SUFFIX}`, `sub/repo/.git/HEAD${TEMP_SUFFIX}`]);
+	});
+
+	it("skips a folder that vanishes mid-walk and never lists a folder twice", async () => {
+		const vault = new FakeVault();
+		vault.setFile("a/x.md", "x");
+		vault.setFile(`b/y.md${TEMP_SUFFIX}`, "y");
+		const realList = vault.adapter.list.bind(vault.adapter);
+		const list = vi.spyOn(vault.adapter, "list").mockImplementation(async (path) => {
+			if (path === "a") throw new Error("ENOENT");
+			const listing = await realList(path);
+			// A link loop: b lists itself as a child.
+			return path === "b" ? { ...listing, folders: [...listing.folders, "b"] } : listing;
+		});
+
+		await new ObsidianVaultAdapter(vault).removeTempFiles();
+
+		expect(list.mock.calls.map(([path]) => path).filter((p) => p === "b")).toHaveLength(1);
+		expect(vault.files.has(`b/y.md${TEMP_SUFFIX}`)).toBe(false);
+	});
+});
+
+describe("ObsidianVaultAdapter.writeChunked", () => {
+	it("cancels the stream when an append fails", async () => {
+		const vault = new FakeVault();
+		vault.adapter.appendBinary = async () => {
+			throw new Error("disk error");
+		};
+		const cancel = vi.fn();
+		const stream = new ReadableStream<Uint8Array>({
+			pull: (controller) => controller.enqueue(enc("chunk")),
+			cancel,
+		});
+
+		await expect(new ObsidianVaultAdapter(vault).writeChunked("note.md", stream, null)).rejects.toThrow("disk error");
+		expect(cancel).toHaveBeenCalledOnce();
+	});
+
+	it("cancels the stream when the temp file cannot be created", async () => {
+		const vault = new FakeVault();
+		vault.adapter.writeBinary = async () => {
+			throw new Error("read-only");
+		};
+		const cancel = vi.fn();
+		const stream = new ReadableStream<Uint8Array>({ pull: (c) => c.enqueue(enc("x")), cancel });
+
+		await expect(new ObsidianVaultAdapter(vault).writeChunked("a/note.md", stream, null)).rejects.toThrow("read-only");
+		expect(cancel).toHaveBeenCalledOnce();
+	});
+
+	it("reports the conflict even when the temp file cannot be removed", async () => {
+		const vault = new FakeVault();
+		const adapter = new ObsidianVaultAdapter(vault);
+		const stream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				vault.setFile("new.md", "made locally");
+				controller.enqueue(enc("remote"));
+				controller.close();
+			},
+		});
+		vault.adapter.remove = async () => {
+			throw new Error("busy");
+		};
+
+		await expect(adapter.writeChunked("new.md", stream, null)).rejects.toMatchObject({
+			code: "conflict-retry",
+			paths: ["new.md"],
+		});
+		expect(new TextDecoder().decode(vault.bytes("new.md"))).toBe("made locally");
+	});
+
+	it("keeps an edit made while the download streamed and removes the temp file", async () => {
+		const vault = new FakeVault();
+		vault.setFile("note.md", "original");
+		const adapter = new ObsidianVaultAdapter(vault);
+		const expected = await adapter.stat("note.md");
+		let sent = false;
+		const stream = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (sent) return controller.close();
+				sent = true;
+				vault.setFile("note.md", "typed meanwhile");
+				controller.enqueue(enc("remote"));
+			},
+		});
+
+		const error = await adapter.writeChunked("note.md", stream, expected).catch((e: unknown) => e);
+		expect(error).toMatchObject({ code: "conflict-retry", paths: ["note.md"] });
+		expect(new TextDecoder().decode(vault.bytes("note.md"))).toBe("typed meanwhile");
+		expect([...vault.files.keys()]).toEqual(["note.md"]);
+	});
+
+	it("does not overwrite a file created while a new one streamed", async () => {
+		const vault = new FakeVault();
+		const adapter = new ObsidianVaultAdapter(vault);
+		const stream = new ReadableStream<Uint8Array>({
+			start(controller) {
+				vault.setFile("new.md", "made locally");
+				controller.enqueue(enc("remote"));
+				controller.close();
+			},
+		});
+
+		await expect(adapter.writeChunked("new.md", stream, null)).rejects.toMatchObject({ code: "conflict-retry" });
+		expect(new TextDecoder().decode(vault.bytes("new.md"))).toBe("made locally");
+	});
+
+	it("appends each chunk to a temp file and moves it into a new folder", async () => {
+		const vault = new FakeVault();
+		const adapter = new ObsidianVaultAdapter(vault);
+
+		await adapter.writeChunked("a/b/note.md", streamOf([enc("line 1\r\n"), enc("line 2\r\n")]), null);
+
+		expect(new TextDecoder().decode(vault.bytes("a/b/note.md"))).toBe("line 1\r\nline 2\r\n");
+		expect(vault.appendCalls).toEqual([`a/b/note.md${TEMP_SUFFIX}`, `a/b/note.md${TEMP_SUFFIX}`]);
+		expect(vault.files.has(`a/b/note.md${TEMP_SUFFIX}`)).toBe(false);
+	});
+
+	it("replaces an existing file", async () => {
+		const vault = new FakeVault();
+		vault.setFile("note.md", "old");
+		const adapter = new ObsidianVaultAdapter(vault);
+		await adapter.writeChunked("note.md", streamOf([enc("new")]), await adapter.stat("note.md"));
+		expect(new TextDecoder().decode(vault.bytes("note.md"))).toBe("new");
+	});
+
+	it("leaves the target untouched when the stream fails, and the temp file goes on cleanup", async () => {
+		const vault = new FakeVault();
+		vault.setFile("note.md", "original");
+		const adapter = new ObsidianVaultAdapter(vault);
+
+		await expect(adapter.writeChunked("note.md", streamOf([enc("par"), enc("tial")], 1), null)).rejects.toThrow(
+			"network dropped",
+		);
+		expect(new TextDecoder().decode(vault.bytes("note.md"))).toBe("original");
+		expect((await adapter.list()).map((f) => f.path)).toEqual(["note.md"]);
+
+		await adapter.removeTempFiles();
+		expect([...vault.files.keys()]).toEqual(["note.md"]);
+	});
+});

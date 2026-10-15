@@ -5,6 +5,7 @@
 		"moduleResolution": "Bundler",
 		"lib": ["DOM", "ES2022"],
 		"strict": true,
+		"noUncheckedIndexedAccess": true,
 		"noEmit": true,
 		"isolatedModules": true,
 		"resolveJsonModule": true,

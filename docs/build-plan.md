@@ -9,7 +9,7 @@ Source documents: `docs/PRD.md`, `docs/TRD.md`, `docs/adr/`, `CLAUDE.md`.
 Not phases. Human-provided inputs that phases depend on.
 
 - **P-A** A public GitHub repository for the plugin, so releases can be installed through BRAT. Gates Phase 0. **Done:** `github.com/trannttoan/univault`, public, Actions enabled. The default `GITHUB_TOKEN` permission is read-only, so the release workflow declares `permissions: contents: write` itself. The plugin id `univault` was unclaimed in `obsidian-releases/community-plugins.json` on 2026-09-26.
-- **P-B** Test devices, each with Obsidian in a dedicated vault that no other sync touches. Any Android phone plus the development Mac gate Phase 0; Obsidian desktop behaves the same on every OS and nothing in Phase 0 is OS-specific. An iOS device gates Phase 1 onward, and is the stricter memory platform because WKWebView is killed well below device RAM. A low-memory Android environment gates the memory criteria from Phase 3 onward: an Android emulator with 2 GB of RAM is enough until a real budget phone (3 to 4 GB, still common in 2026 outside flagship markets) is available. Device RAM is a proxy; the actual constraints are the WebView heap and background kill behavior, so the byte budget is checked with DevTools attached on whatever device is in use. A Windows machine or VM gates the case-insensitive and NFD path tests in Phase 2.
+- **P-B** Test devices, each with Obsidian in a dedicated vault that no other sync touches. The development Mac plus one phone of each platform gate Phase 0; Obsidian desktop behaves the same on every OS and nothing in Phase 0 is OS-specific. **Done:** the Mac, an iPhone 13 and a OnePlus 6T on Android 11, each with a dedicated vault (the iPhone's stored on the device, not in iCloud Drive). iOS is the stricter memory platform because WKWebView is killed well below device RAM. A low-memory Android environment gates the memory criteria from Phase 3 onward; the OnePlus 6T is not one, so that needs a real budget phone (3 to 4 GB, still common in 2026 outside flagship markets) or an Android emulator (Android Studio AVD with a Play Store image, 2 GB of RAM, `chrome://inspect` for DevTools). Device RAM is a proxy; the actual constraints are the WebView heap and background kill behavior, so the byte budget is checked with DevTools attached on whatever device is in use. A Windows machine or VM gates the case-insensitive and NFD path tests in Phase 2.
 - **P-C** A GitHub organization owning the Univault GitHub App: public, no webhook, device flow enabled, permissions *Contents: read and write* and *Metadata: read*. Gates Phase 4. **Done:** organization `univault-app`, app **Univault Sync** (slug `univault-sync`, client ID `Iv23liZmqSUyZ5EhTO5P`). Device flow, secret-free refresh, token lifetimes, and rotation were verified on 2026-09-26; details in ADR-006.
 
 ## Release environment
@@ -18,18 +18,19 @@ The environment actual releases use is: a GitHub release containing `main.js`, `
 
 ---
 
-## Phase 0: Walking skeleton — `todo`
+## Phase 0: Walking skeleton — `done`
 
-- **Goal:** A user who installs the tagged release through BRAT on a desktop and on the Android device can sign in with a token, name a repository and branch, press sync on one device, and see one changed note arrive on the other.
+- **Goal:** A user who installs the tagged release through BRAT on a desktop and on a phone can sign in with a token, name a repository and branch, press sync on one device, and see one changed note arrive on the other.
 - **Scope out:** Device-flow sign-in, repository picker, merging, conflicts, deletions, renames, ignore rules, first-sync preview, automatic triggers, history, config sync, large files, devices list, any settings beyond token, owner/repo, branch, and device name.
 - **Acceptance criteria:**
-  - CI builds from a tag, runs the test suite, and publishes a GitHub release that BRAT installs on both devices with `minAppVersion` 1.13.0; if either device rejects the version, the true minimum is recorded and the manifest corrected within this phase (spike S6).
+  - CI builds from a tag, runs the test suite, and publishes a GitHub release that BRAT installs on both devices with `minAppVersion` 1.13.0; if either device rejects the version, the true minimum is recorded and the manifest corrected within this phase.
   - Editing one note and pressing sync on device A produces exactly one commit on the branch with a `Univault-Device` trailer naming device A.
   - Pressing sync on device B with no local changes downloads that note by streamed transfer and writes it byte-identical.
   - Pressing sync when neither side changed makes no commit and costs zero quota against the remote head check.
   - The sync anchor and index are stored in IndexedDB and survive an app restart on both devices.
   - The status bar shows idle, syncing, and error.
-- **Risk retired:** The commit-anchored state model, IndexedDB persistence, and native streaming `fetch` against `api.github.com` all work inside Electron, the Android WebView, and the release pipeline. If any fails, ADR-001 or ADR-004 is revisited before features exist.
+- **Risk retired:** The commit-anchored state model, IndexedDB persistence, and native streaming `fetch` against `api.github.com` all work inside Electron, iOS WKWebView, the Android WebView, and the release pipeline. The iOS run also answers spike S9 for the current Obsidian build. If any fails, ADR-001 or ADR-004 is revisited before features exist.
+- **Done 2026-10-15** on release 0.1.1 installed through BRAT: macOS 26.6.2 with Obsidian 1.14.4; iPhone 13 on iOS 26.6.2 with Obsidian 1.14.5 (387); OnePlus 6T on Android 11 (OxygenOS 11.1.2.2) with Obsidian 1.14.4 (389). All six criteria observed on all three devices, with two qualifications. Zero quota on the no-op was read from `x-ratelimit-remaining` on the Mac only; on the phones no inspector was attached, so the check degraded to no new commit and the "already in sync" notice. A repository containing `.gitignore` was not tried. Force-quitting Obsidian on the iPhone kept the anchor and the next sync was a no-op, the first data point for spike S9, and streamed downloads through `appendBinary` worked on iOS, which closes spike S6. Editing the same note on two devices before either synced behaved as the Phase 0 rule says: the first device's commit landed and the second refused with `conflict-retry` naming the note, with neither edit lost; merging is Phase 1. Release 0.1.0 was the first build on the devices; 0.1.1 added the sign-in failure cause to the settings status after an intermittent "You're offline" on re-entering a token on the Mac, which did not recur.
 - **Depends on:** None. Prerequisites P-A, P-B.
 - **TRD triggers:** None.
 
@@ -109,7 +110,7 @@ The environment actual releases use is: a GitHub release containing `main.js`, `
   - Sending A to the background after edits pushes them.
   - With the network off, no automatic sync produces a notice or error state; the status shows offline; a manual sync reports offline once.
   - A one-hour session of continuous editing with ten changed files per pause stays under 500 requests, measured from the rate-limit headers.
-  - Spike S7: an unchanged head check returns 304 and does not decrement the remaining quota; if it does, the poll interval is adjusted and the TRD deferred decision resolved.
+  - Spike S7: an unchanged head check returns 304 and does not decrement the remaining quota for a GitHub App user-to-server token (already confirmed for an OAuth user token); if it does, the poll interval is adjusted and the TRD deferred decision resolved.
   - A rate-limited response pauses automatic syncs until the reset time and says so; it is never shown as an authentication error.
 - **Risk retired:** The propagation target and quota model hold with the chosen triggers.
 - **Depends on:** 1.
@@ -209,4 +210,5 @@ Unordered. Each is a small slice with its own acceptance when picked up.
 
 - PRD 5.1: the repository-creation path is conditional on spike S2; the PRD already marks it spike-dependent and should be updated with the outcome after Phase 4.
 - PRD section 7 scale targets are provisional and are replaced by Phase 3's measurements.
-- TRD stack: `minAppVersion` 1.13.0 is provisional until Phase 0 confirms it on both devices.
+- TRD stack: `minAppVersion` 1.13.0 rests on the declarative settings API, not on ranged `readBinary`, which no published Obsidian API offers (corrected 2026-10-14). Phase 0 still confirms both devices accept it.
+- TRD interface contract: GitHub's responses on an empty repository, on a missing branch, and to a non-fast-forward ref update were measured on 2026-10-14 and recorded there. The first sync into an empty repository makes two commits: the Contents API bootstrap and the regular sync commit.

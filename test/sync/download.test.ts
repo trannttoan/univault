@@ -1,0 +1,183 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { gitBlobSha } from "../../src/vault/hash";
+import { createHarness, type Harness, REPO, TRAILER } from "./harness";
+
+describe("download cycle", () => {
+	let h: Harness;
+
+	beforeEach(async () => {
+		h = await createHarness();
+	});
+
+	it("streams a remote change into the vault byte-identical, in several appends", async () => {
+		await h.inSync({ "a.md": "a" });
+		const crlf = new TextEncoder().encode("from the phone\r\nsecond line\r\n");
+		const binary = new Uint8Array([...Array(256).keys()]);
+		h.github.commitFiles(REPO, "main", { "a.md": crlf, "deep/er/bytes.bin": binary });
+
+		expect(await h.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 2 });
+
+		expect(h.vault.bytes("a.md")).toEqual(crlf);
+		expect(h.vault.bytes("deep/er/bytes.bin")).toEqual(binary);
+		expect(h.vault.appendCalls.filter((p) => p.startsWith("a.md")).length).toBeGreaterThan(1);
+		expect([...h.vault.files.keys()].some((p) => p.endsWith(".univault-partial"))).toBe(false);
+	});
+
+	it("leaves vault, anchor and index untouched when a download drops mid-stream, then recovers", async () => {
+		await h.inSync({ "a.md": "original" });
+		const anchor = await h.store.getAnchor();
+		const index = await h.store.getIndex();
+		const head = h.github.commitFiles(REPO, "main", { "a.md": "the new remote text" });
+		const enc = new TextEncoder();
+		h.github.inject("GET", /\/git\/blobs\//, { brokenStream: [enc.encode("the "), enc.encode("new ")] });
+
+		const failed = await h.orchestrator.sync("manual");
+
+		expect(failed.kind).toBe("failed");
+		expect(new TextDecoder().decode(h.vault.bytes("a.md"))).toBe("original");
+		expect(await h.store.getAnchor()).toEqual(anchor);
+		expect(await h.store.getIndex()).toEqual(index);
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes("a.md"))).toBe("the new remote text");
+		expect([...h.vault.files.keys()]).toEqual(["a.md"]);
+		expect((await h.store.getAnchor())?.commitSha).toBe(head);
+	});
+
+	it("advances the anchor to the head and indexes the downloads", async () => {
+		await h.inSync({ "a.md": "a" });
+		const head = h.github.commitFiles(REPO, "main", { "b.md": "new" });
+
+		await h.orchestrator.sync("manual");
+
+		expect((await h.store.getAnchor())?.commitSha).toBe(head);
+		const entry = (await h.store.getIndex()).get("b.md");
+		expect(entry?.blobSha).toBe(await gitBlobSha(new TextEncoder().encode("new")));
+		expect(entry?.size).toBe(3);
+
+		h.github.requests.length = 0;
+		expect(await h.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
+		expect(h.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
+	});
+
+	it("downloads a dot-prefixed file the vault index never lists", async () => {
+		await h.inSync({ "a.md": "a" });
+		const head = h.github.commitFiles(REPO, "main", { ".gitignore": "node_modules\n" });
+
+		expect(await h.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes(".gitignore"))).toBe("node_modules\n");
+		expect((await h.store.getAnchor())?.commitSha).toBe(head);
+		expect((await h.store.getIndex()).has(".gitignore")).toBe(true);
+
+		h.github.commitFiles(REPO, "main", { ".gitignore": "dist\n" });
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes(".gitignore"))).toBe("dist\n");
+	});
+
+	it("keeps a local edit to a dot-prefixed file instead of overwriting it", async () => {
+		await h.inSync({ "a.md": "a" });
+		h.github.commitFiles(REPO, "main", { ".gitignore": "node_modules\n" });
+		await h.orchestrator.sync("manual");
+		await h.vault.adapter.writeBinary(".gitignore", new TextEncoder().encode("node_modules\n.env\n").buffer);
+		h.github.commitFiles(REPO, "main", { ".gitignore": "dist\n" });
+		const anchor = await h.store.getAnchor();
+
+		const outcome = await h.orchestrator.sync("manual");
+
+		expect(outcome.kind === "failed" && outcome.error).toMatchObject({ code: "conflict-retry", paths: [".gitignore"] });
+		expect(new TextDecoder().decode(h.vault.bytes(".gitignore"))).toBe("node_modules\n.env\n");
+		expect(await h.store.getAnchor()).toEqual(anchor);
+	});
+
+	it("refuses to replace a file on disk that neither the scan nor the index knows", async () => {
+		await h.inSync({ "a.md": "a" });
+		await h.vault.adapter.writeBinary(".env", new TextEncoder().encode("SECRET=1").buffer);
+		h.github.commitFiles(REPO, "main", { ".env": "SECRET=remote" });
+
+		const outcome = await h.orchestrator.sync("manual");
+
+		expect(outcome.kind === "failed" && outcome.error).toMatchObject({ code: "conflict-retry", paths: [".env"] });
+		expect(new TextDecoder().decode(h.vault.bytes(".env"))).toBe("SECRET=1");
+		expect([...h.vault.files.keys()].sort()).toEqual([".env", "a.md"]);
+	});
+
+	it("restores a locally deleted file when the remote changed it", async () => {
+		await h.inSync({ "a.md": "a", "b.md": "b" });
+		h.vault.files.delete("b.md");
+		h.github.commitFiles(REPO, "main", { "b.md": "b from phone" });
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes("b.md"))).toBe("b from phone");
+	});
+
+	it.each(["../escape.md", ".obsidian/plugins/univault/main.js", ".OBSIDIAN/app.json"])(
+		"refuses %s with path-unsafe and writes nothing",
+		async (unsafe) => {
+			await h.inSync({ "a.md": "a" });
+			const anchor = await h.store.getAnchor();
+			h.github.commitFiles(REPO, "main", { "fine.md": "fine", [unsafe]: "evil" });
+
+			const outcome = await h.orchestrator.sync("manual");
+
+			expect(outcome.kind === "failed" && outcome.error.code).toBe("path-unsafe");
+			expect([...h.vault.files.keys()]).toEqual(["a.md"]);
+			expect(h.vault.appendCalls).toHaveLength(0);
+			expect(await h.store.getAnchor()).toEqual(anchor);
+		},
+	);
+
+	it("uploads and downloads in one sync with one commit and indexes both", async () => {
+		await h.inSync({ "mine.md": "v1", "theirs.md": "v1" });
+		const remoteHead = h.github.commitFiles(REPO, "main", { "theirs.md": "v2 remote" });
+		h.vault.setFile("mine.md", "v2 local");
+
+		expect(await h.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 1, downloaded: 1 });
+
+		const head = h.github.head(REPO, "main")!;
+		const commit = h.github.commit(REPO, head)!;
+		expect(commit.parents).toEqual([remoteHead]);
+		expect(commit.message.endsWith(TRAILER)).toBe(true);
+		expect(new TextDecoder().decode(h.github.file(REPO, "main", "mine.md"))).toBe("v2 local");
+		expect(new TextDecoder().decode(h.github.file(REPO, "main", "theirs.md"))).toBe("v2 remote");
+		expect(new TextDecoder().decode(h.vault.bytes("theirs.md"))).toBe("v2 remote");
+		expect(h.github.requests.filter((r) => r.path.endsWith("/git/commits") && r.method === "POST")).toHaveLength(1);
+
+		const index = await h.store.getIndex();
+		expect([...index.keys()].sort()).toEqual(["mine.md", "theirs.md"]);
+		expect((await h.store.getAnchor())?.commitSha).toBe(head);
+	});
+
+	it.each(["renamed", "copied", "changed"])("downloads a %s compare entry at its new path", async (status) => {
+		await h.inSync({ "old.md": "moved text" });
+		const head = h.github.commitFiles(REPO, "main", { "new.md": "moved text" });
+		const sha = await gitBlobSha(new TextEncoder().encode("moved text"));
+		h.github.inject("GET", /\/compare\//, {
+			status: 200,
+			body: { status: "ahead", files: [{ filename: "new.md", status, previous_filename: "old.md", sha }] },
+		});
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(new TextDecoder().decode(h.vault.bytes("new.md"))).toBe("moved text");
+		expect((await h.store.getAnchor())?.commitSha).toBe(head);
+	});
+
+	it("falls back to the recursive tree when the anchor commit is gone", async () => {
+		await h.inSync({ "a.md": "a" });
+		h.github.commitFiles(REPO, "main", { "b.md": "b" });
+		h.github.inject("GET", /\/compare\//, { status: 404 });
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 1 });
+		expect(h.github.requests.some((r) => r.path.includes("/git/trees/"))).toBe(true);
+		expect(new TextDecoder().decode(h.vault.bytes("b.md"))).toBe("b");
+	});
+
+	it("falls back to the recursive tree when compare lists 300 files", async () => {
+		await h.inSync({ "a.md": "a" });
+		const files = Object.fromEntries(Array.from({ length: 301 }, (_, i) => [`bulk/n${i}.md`, `note ${i}`]));
+		h.github.commitFiles(REPO, "main", files);
+
+		expect(await h.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 301 });
+		expect(h.github.requests.some((r) => r.path.includes("/git/trees/"))).toBe(true);
+		expect(new TextDecoder().decode(h.vault.bytes("bulk/n300.md"))).toBe("note 300");
+	});
+});
