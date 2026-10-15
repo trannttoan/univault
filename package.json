@@ -1,6 +1,6 @@
 {
 	"name": "univault",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Sync your Obsidian vault across desktop and mobile through your own private GitHub repository.",
 	"private": true,
 	"type": "module",
