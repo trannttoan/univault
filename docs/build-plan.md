@@ -9,7 +9,7 @@ Source documents: `docs/PRD.md`, `docs/TRD.md`, `docs/adr/`, `CLAUDE.md`.
 Not phases. Human-provided inputs that phases depend on.
 
 - **P-A** A public GitHub repository for the plugin, so releases can be installed through BRAT. Gates Phase 0. **Done:** `github.com/trannttoan/univault`, public, Actions enabled. The default `GITHUB_TOKEN` permission is read-only, so the release workflow declares `permissions: contents: write` itself. The plugin id `univault` was unclaimed in `obsidian-releases/community-plugins.json` on 2026-09-26.
-- **P-B** Test devices, each with Obsidian in a dedicated vault that no other sync touches. Any Android phone plus the development Mac gate Phase 0; Obsidian desktop behaves the same on every OS and nothing in Phase 0 is OS-specific. An iOS device gates Phase 1 onward, and is the stricter memory platform because WKWebView is killed well below device RAM. A low-memory Android environment gates the memory criteria from Phase 3 onward: an Android emulator with 2 GB of RAM is enough until a real budget phone (3 to 4 GB, still common in 2026 outside flagship markets) is available. Device RAM is a proxy; the actual constraints are the WebView heap and background kill behavior, so the byte budget is checked with DevTools attached on whatever device is in use. A Windows machine or VM gates the case-insensitive and NFD path tests in Phase 2.
+- **P-B** Test devices, each with Obsidian in a dedicated vault that no other sync touches. The development Mac plus one phone of either platform gate Phase 0, with the other mobile engine covered by an Android emulator (Android Studio AVD with a Play Store image, 2 GB of RAM, `chrome://inspect` for DevTools); Obsidian desktop behaves the same on every OS and nothing in Phase 0 is OS-specific. The available phone is an iPhone 13, so Phase 0 runs on iOS and the emulator. iOS is the stricter memory platform because WKWebView is killed well below device RAM. A low-memory Android environment gates the memory criteria from Phase 3 onward: the same emulator is enough until a real budget phone (3 to 4 GB, still common in 2026 outside flagship markets) is available. Device RAM is a proxy; the actual constraints are the WebView heap and background kill behavior, so the byte budget is checked with DevTools attached on whatever device is in use. A Windows machine or VM gates the case-insensitive and NFD path tests in Phase 2.
 - **P-C** A GitHub organization owning the Univault GitHub App: public, no webhook, device flow enabled, permissions *Contents: read and write* and *Metadata: read*. Gates Phase 4. **Done:** organization `univault-app`, app **Univault Sync** (slug `univault-sync`, client ID `Iv23liZmqSUyZ5EhTO5P`). Device flow, secret-free refresh, token lifetimes, and rotation were verified on 2026-09-26; details in ADR-006.
 
 ## Release environment
@@ -20,7 +20,7 @@ The environment actual releases use is: a GitHub release containing `main.js`, `
 
 ## Phase 0: Walking skeleton — `todo`
 
-- **Goal:** A user who installs the tagged release through BRAT on a desktop and on the Android device can sign in with a token, name a repository and branch, press sync on one device, and see one changed note arrive on the other.
+- **Goal:** A user who installs the tagged release through BRAT on a desktop and on a phone can sign in with a token, name a repository and branch, press sync on one device, and see one changed note arrive on the other.
 - **Scope out:** Device-flow sign-in, repository picker, merging, conflicts, deletions, renames, ignore rules, first-sync preview, automatic triggers, history, config sync, large files, devices list, any settings beyond token, owner/repo, branch, and device name.
 - **Acceptance criteria:**
   - CI builds from a tag, runs the test suite, and publishes a GitHub release that BRAT installs on both devices with `minAppVersion` 1.13.0; if either device rejects the version, the true minimum is recorded and the manifest corrected within this phase.
@@ -29,7 +29,7 @@ The environment actual releases use is: a GitHub release containing `main.js`, `
   - Pressing sync when neither side changed makes no commit and costs zero quota against the remote head check.
   - The sync anchor and index are stored in IndexedDB and survive an app restart on both devices.
   - The status bar shows idle, syncing, and error.
-- **Risk retired:** The commit-anchored state model, IndexedDB persistence, and native streaming `fetch` against `api.github.com` all work inside Electron, the Android WebView, and the release pipeline. If any fails, ADR-001 or ADR-004 is revisited before features exist.
+- **Risk retired:** The commit-anchored state model, IndexedDB persistence, and native streaming `fetch` against `api.github.com` all work inside Electron, iOS WKWebView, the Android WebView (emulator), and the release pipeline. The iOS run also answers spike S9 for the current Obsidian build. If any fails, ADR-001 or ADR-004 is revisited before features exist.
 - **Depends on:** None. Prerequisites P-A, P-B.
 - **TRD triggers:** None.
 
