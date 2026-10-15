@@ -1,7 +1,6 @@
 import { type App, PluginSettingTab, Setting } from "obsidian";
-import { UnivaultError } from "./errors";
 import type UnivaultPlugin from "./main";
-import { errorMessage } from "./ui/messages";
+import { signInFailure } from "./ui/messages";
 
 export interface UnivaultSettings {
 	repository: string;
@@ -68,7 +67,7 @@ export class UnivaultSettingTab extends PluginSettingTab {
 					try {
 						this.signInStatus = `Signed in as ${await this.plugin.session.signInWithToken(token)}`;
 					} catch (error) {
-						this.signInStatus = errorMessage(error instanceof UnivaultError ? error.code : "unknown");
+						this.signInStatus = signInFailure(error, login);
 					}
 					this.display();
 				}),

@@ -1,4 +1,4 @@
-import type { ErrorCode } from "../errors";
+import { type ErrorCode, UnivaultError } from "../errors";
 import type { SyncOutcome } from "../sync/orchestrator";
 
 const MESSAGES: Record<ErrorCode, string> = {
@@ -16,6 +16,16 @@ const MESSAGES: Record<ErrorCode, string> = {
 
 export function errorMessage(code: ErrorCode): string {
 	return MESSAGES[code];
+}
+
+// A failed sign-in keeps any existing session. Codes the user cannot act on from the
+// message alone carry the client's (already redacted) cause, since there is no log yet.
+export function signInFailure(error: unknown, login: string | null): string {
+	const code = error instanceof UnivaultError ? error.code : "unknown";
+	const cause = error instanceof Error && error.cause instanceof Error ? error.cause.message : null;
+	const detail = cause && (code === "offline" || code === "unknown") ? ` (${cause})` : "";
+	const kept = login ? ` Still signed in as ${login}.` : "";
+	return `${errorMessage(code)}${detail}${kept}`;
 }
 
 export function outcomeMessage(outcome: SyncOutcome): string {
