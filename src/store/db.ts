@@ -35,6 +35,8 @@ export interface PendingConflict {
 	baseSha: string | null;
 	remoteSha: string;
 	remoteDevice: string;
+	// The GitHub login in the device trailer; device names are self-chosen, so the picker shows both.
+	remoteLogin: string | null;
 	remoteTime: string;
 	localSha: string;
 	localStat: { mtime: number; size: number };

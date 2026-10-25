@@ -524,9 +524,13 @@ export class Orchestrator {
 
 // "Who and when" for a conflict, from the head commit: its device trailer, else its author.
 // Wrong when several devices pushed since the anchor; device manifests revisit this.
-function remoteAuthor(commit: Commit | null): { remoteDevice: string; remoteTime: string } {
-	const device = commit && deviceTrailer(commit.message)?.device;
-	return { remoteDevice: device || commit?.author.name || "another device", remoteTime: commit?.author.date ?? "" };
+function remoteAuthor(commit: Commit | null): Pick<PendingConflict, "remoteDevice" | "remoteLogin" | "remoteTime"> {
+	const trailer = commit && deviceTrailer(commit.message);
+	return {
+		remoteDevice: trailer?.device || commit?.author.name || "another device",
+		remoteLogin: trailer?.login ?? null,
+		remoteTime: commit?.author.date ?? "",
+	};
 }
 
 // Paths both sides changed to the same content: nothing to transfer, but the index learns them.

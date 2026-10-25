@@ -22,10 +22,11 @@ export class ConflictPicker extends Modal {
 	}
 
 	onOpen(): void {
-		const { path, remoteDevice, remoteTime } = this.conflict;
+		const { path, remoteDevice, remoteLogin, remoteTime } = this.conflict;
 		this.setTitle(`Conflict in ${path}`);
+		const who = remoteLogin ? `${remoteDevice} (${remoteLogin})` : remoteDevice;
 		const when = remoteTime ? ` on ${new Date(remoteTime).toLocaleString()}` : "";
-		this.contentEl.createEl("p", { text: `Changed on this device and on ${remoteDevice}${when}.` });
+		this.contentEl.createEl("p", { text: `Changed on this device and on ${who}${when}.` });
 		for (const [choice, label] of CHOICES) {
 			this.contentEl.createEl("button", { text: label }).addEventListener("click", () => {
 				this.chosen = choice;

@@ -3,11 +3,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import manifest from "../manifest.json";
 import UnivaultPlugin from "../src/main";
 import { readSettings } from "../src/settings";
-import { StateStore } from "../src/store/db";
+import { type PendingConflict, StateStore } from "../src/store/db";
 import { FakeGitHub } from "./fakes/github";
 import { App as FakeApp, type Plugin as FakePlugin, Modal, Notice } from "./fakes/obsidian";
 
 const TOKEN = "github_pat_secret123";
+const conflict = (fields: Partial<PendingConflict>): PendingConflict => ({
+	path: "n.md",
+	kind: "text-overlap",
+	baseSha: "2".repeat(40),
+	remoteSha: "3".repeat(40),
+	remoteDevice: "Phone",
+	remoteLogin: "octo",
+	remoteTime: "2026-10-25T07:41:00Z",
+	localSha: "1".repeat(40),
+	localStat: { mtime: 1, size: 1 },
+	localSnapshotId: null,
+	choice: null,
+	siblingPath: null,
+	...fields,
+});
 
 describe("UnivaultPlugin", () => {
 	let app: FakeApp;
@@ -169,19 +184,7 @@ describe("UnivaultPlugin", () => {
 			createdAt: new Date().toISOString(),
 			reason: "conflict-local",
 		});
-		await store.putConflict({
-			path: "n.md",
-			kind: "text-overlap",
-			baseSha: "2".repeat(40),
-			remoteSha: "3".repeat(40),
-			remoteDevice: "Phone",
-			remoteTime: "2026-10-25T07:41:00Z",
-			localSha: "1".repeat(40),
-			localStat: { mtime: 1, size: ours.byteLength },
-			localSnapshotId: "snap",
-			choice: null,
-			siblingPath: null,
-		});
+		await store.putConflict(conflict({ localStat: { mtime: 1, size: ours.byteLength }, localSnapshotId: "snap" }));
 		store.close();
 		github.requests.length = 0;
 
@@ -190,7 +193,7 @@ describe("UnivaultPlugin", () => {
 		await plugin.onload();
 
 		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));
-		expect(Modal.open[0]?.text()).toContain("Phone");
+		expect(Modal.open[0]?.text()).toContain("Phone (octo)");
 		expect(fake.statusBarItems[0]?.text).toBe("Univault: 1 conflict");
 		expect(github.requests).toHaveLength(0);
 		expect((await plugin.store.getSnapshot("snap"))?.bytes).toEqual(ours);
@@ -198,19 +201,7 @@ describe("UnivaultPlugin", () => {
 
 	it("opens pickers from the resolve conflicts command, and none while one is open", async () => {
 		const command = fake.commands.find((c) => c.id === "resolve-conflicts");
-		await plugin.store.putConflict({
-			path: "a.md",
-			kind: "binary",
-			baseSha: null,
-			remoteSha: "3".repeat(40),
-			remoteDevice: "Phone",
-			remoteTime: "",
-			localSha: "1".repeat(40),
-			localStat: { mtime: 1, size: 1 },
-			localSnapshotId: null,
-			choice: null,
-			siblingPath: null,
-		});
+		await plugin.store.putConflict(conflict({ path: "a.md", kind: "binary", baseSha: null, remoteTime: "" }));
 		command?.callback?.();
 		command?.callback?.();
 		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));

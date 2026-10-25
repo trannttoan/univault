@@ -43,7 +43,7 @@ describe("same paragraph edited on two devices", () => {
 		expect(text(b.github.file(REPO, "main", NOTE))).toBe(THEIRS);
 		const records = await b.orchestrator.conflicts();
 		expect(records).toHaveLength(1);
-		expect(records[0]).toMatchObject({ path: NOTE, kind: "text-overlap", remoteDevice: "A", remoteTime: A_TIME, choice: null });
+		expect(records[0]).toMatchObject({ path: NOTE, kind: "text-overlap", remoteDevice: "A", remoteLogin: "octo", remoteTime: A_TIME, choice: null });
 		expect(text((await b.store.getSnapshot(records[0]!.localSnapshotId!))?.bytes)).toBe(OURS);
 		expect((await b.store.getIndex()).get(NOTE)?.blobSha).toBe(records[0]?.baseSha);
 	});
@@ -69,7 +69,7 @@ describe("same paragraph edited on two devices", () => {
 		expect(Modal.open).toHaveLength(1);
 		const shown = Modal.open[0]!.text();
 		expect(shown).toContain(NOTE);
-		expect(shown).toContain("A");
+		expect(shown).toContain("A (octo)");
 		expect(shown).toContain(new Date(A_TIME).toLocaleString());
 
 		Modal.open[0]!.close();
