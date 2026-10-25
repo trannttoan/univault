@@ -38,11 +38,18 @@ export function outcomeMessage(outcome: SyncOutcome): string {
 			const { code, paths } = outcome.error;
 			return `Univault: ${errorMessage(code)}${paths.length ? ` Files: ${paths.join(", ")}` : ""}`;
 		}
+		case "first-sync-differs":
+			return (
+				"Univault: these files differ between this vault and the repository, and a first sync can't combine them yet. " +
+				`Make each pair match, or move one copy aside, then sync again. Files: ${outcome.paths.join(", ")}`
+			);
 		case "synced": {
 			const merged = outcome.merged?.length ?? 0;
-			if (outcome.uploaded + outcome.downloaded + merged === 0) return "Univault: already in sync.";
+			const conflicts = outcome.conflicts?.length ?? 0;
+			const pending = conflicts ? ` ${conflicts} ${conflicts === 1 ? "conflict" : "conflicts"} to resolve.` : "";
+			if (outcome.uploaded + outcome.downloaded + merged === 0) return `Univault: already in sync.${pending}`;
 			const merges = merged ? `, ${merged} merged` : "";
-			return `Univault: synced, ${outcome.uploaded} uploaded, ${outcome.downloaded} downloaded${merges}.`;
+			return `Univault: synced, ${outcome.uploaded} uploaded, ${outcome.downloaded} downloaded${merges}.${pending}`;
 		}
 	}
 }

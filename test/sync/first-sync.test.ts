@@ -33,8 +33,11 @@ describe("first sync without an anchor", () => {
 
 		const outcome = await h.orchestrator.sync("manual");
 
-		expect(outcome.kind === "failed" && outcome.error).toMatchObject({ code: "conflict-retry", paths: ["a.md", "c.md"] });
+		expect(outcome).toEqual({ kind: "first-sync-differs", paths: ["a.md", "c.md"] });
+		expect(outcomeMessage(outcome)).toContain("can't combine them yet");
 		expect(outcomeMessage(outcome)).toContain("a.md, c.md");
+		expect(outcomeMessage(outcome)).not.toContain("kept changing");
+		expect(h.orchestrator.state).toBe("error");
 		expect(text(h.vault.bytes("a.md"))).toBe("local");
 		expect(text(h.vault.bytes("c.md"))).toBe("local c");
 		expect(h.github.head(REPO, "main")).toBe(head);

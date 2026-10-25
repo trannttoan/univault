@@ -22,6 +22,8 @@ export type SyncOutcome =
 	// a choice after this sync. Each is present only when it has entries.
 	| { kind: "synced"; uploaded: number; downloaded: number; merged?: string[]; conflicts?: string[] }
 	| { kind: "remote-empty" }
+	// No anchor yet, and these paths differ between the vault and the repository.
+	| { kind: "first-sync-differs"; paths: string[] }
 	| { kind: "needs-setup" }
 	| { kind: "failed"; error: UnivaultError };
 
@@ -213,7 +215,7 @@ export class Orchestrator {
 		// Without an anchor every difference is base-less; a picker per file is the wrong tool
 		// for a vault being joined to a populated repository, so that sync still refuses.
 		const conflicts = [...outcomes].filter(([, o]) => o === "conflict").map(([path]) => path);
-		if (conflicts.length && !anchor) throw new UnivaultError("conflict-retry", { paths: conflicts.sort() });
+		if (conflicts.length && !anchor) return { kind: "first-sync-differs", paths: conflicts.sort() };
 
 		const merged = await this.merge(context, outcomes, local, remote, working, headCommit);
 		const indexed = [...applied.index, ...sameOnBothSides(outcomes, local, remote), ...merged.downloaded];
