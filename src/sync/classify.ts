@@ -4,7 +4,7 @@ import type { RemoteChange } from "./remote-delta";
 
 export type Outcome = "noop" | "upload" | "download" | "merge" | "conflict";
 
-// Deletions on either side are still ignored. A path changed on both sides to different content
+// Deletions on either side are ignored until deletions sync. A path changed on both sides to different content
 // merges against its index entry, the base both sides agreed on; with no entry there is no base.
 // Without an anchor every file on each side arrives as "added", so the same rules apply.
 export function classify(local: LocalChange | undefined, remote: RemoteChange | undefined, entry?: IndexEntry): Outcome {

@@ -190,8 +190,6 @@ export class Orchestrator {
 		}
 		if (!head) throw new UnivaultError("unknown", { cause: new Error("No head without an anchor") });
 
-		// A pending path keeps its base index entry and is left out of classification until the
-		// user's choice is applied; the rest of the vault syncs around it.
 		// Theirs moved again since the picker was answered: the old answer no longer applies.
 		const refreshed: PendingConflict[] = [];
 		const records: PendingConflict[] = [];
@@ -214,13 +212,15 @@ export class Orchestrator {
 		const scan = await this.scan(working);
 		const local = scan.changes;
 		for (const [path, change] of applied.added) local.set(path, change);
+		// A pending path keeps its base index entry and is left out of classification until the
+		// user's choice is applied; the rest of the vault syncs around it.
 		for (const { path } of pending) {
 			local.delete(path);
 			remote.delete(path);
 		}
 		const outcomes = classifyAll(local, remote, working);
 		// Without an anchor every difference is base-less; a picker per file is the wrong tool
-		// for a vault being joined to a populated repository, so that sync still refuses.
+		// for a vault being joined to a populated repository, so that sync refuses.
 		const conflicts = [...outcomes].filter(([, o]) => o === "conflict").map(([path]) => path);
 		if (conflicts.length && !anchor) return { kind: "first-sync-differs", paths: conflicts.sort() };
 
