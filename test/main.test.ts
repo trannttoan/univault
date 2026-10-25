@@ -113,6 +113,25 @@ describe("UnivaultPlugin", () => {
 		expect(fake.data).toMatchObject({ deviceName: "Phone 2" });
 	});
 
+	it("shows a merge notice whose review link opens the merged note", async () => {
+		github.createRepo("octo/vault");
+		github.commitFiles("octo/vault", "main", { "n.md": "one\n\ntwo\n" });
+		await plugin.session.signInWithToken(TOKEN);
+		await plugin.updateSettings({ repository: "octo/vault" });
+		expect(await plugin.syncNow()).toMatchObject({ kind: "synced", downloaded: 1 });
+
+		github.commitFiles("octo/vault", "main", { "n.md": "ONE\n\ntwo\n" });
+		app.vault.setFile("n.md", "one\n\nTWO\n");
+		expect(await plugin.syncNow()).toMatchObject({ kind: "synced", merged: ["n.md"] });
+
+		const notice = Notice.instances.at(-1)!;
+		expect(notice.message).toBe("Univault: synced, 0 uploaded, 0 downloaded, 1 merged.");
+		const link = notice.messageEl.descendants().find((el) => el.tag === "a");
+		expect(link?.text).toBe("Review n.md");
+		link?.click();
+		expect(app.workspace.opened).toEqual(["n.md"]);
+	});
+
 	it("discards the anchor at the next sync after the repository changes", async () => {
 		github.createRepo("octo/other");
 		const head = github.commitFiles("octo/other", "main", { "other.md": "o" });

@@ -1,10 +1,20 @@
 import type { GitHubClient } from "../github/client";
 import type { NewTreeEntry } from "../github/types";
 
-// Subject plus the ADR-005 trailer, which is frozen once released.
-export function commitMessage(deviceName: string, login: string): string {
+export interface MergeTrailer {
+	path: string;
+	base: string;
+	ours: string;
+	theirs: string;
+}
+
+// Subject plus the ADR-005 trailers, which are frozen once released. Readers parse
+// Univault-Merge from the right, since the path may contain spaces.
+export function commitMessage(deviceName: string, login: string, merges: MergeTrailer[] = []): string {
 	const device = deviceName.replace(/\s+/g, " ").trim();
-	return `Sync from ${device}\n\nUnivault-Device: ${login}/${device}`;
+	const trailers = [`Univault-Device: ${login}/${device}`];
+	for (const m of merges) trailers.push(`Univault-Merge: ${m.path} ${m.base} ${m.ours} ${m.theirs}`);
+	return `Sync from ${device}\n\n${trailers.join("\n")}`;
 }
 
 export async function createSyncCommit(

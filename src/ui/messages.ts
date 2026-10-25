@@ -38,9 +38,11 @@ export function outcomeMessage(outcome: SyncOutcome): string {
 			const { code, paths } = outcome.error;
 			return `Univault: ${errorMessage(code)}${paths.length ? ` Files: ${paths.join(", ")}` : ""}`;
 		}
-		case "synced":
-			return outcome.uploaded + outcome.downloaded === 0
-				? "Univault: already in sync."
-				: `Univault: synced, ${outcome.uploaded} uploaded, ${outcome.downloaded} downloaded.`;
+		case "synced": {
+			const merged = outcome.merged?.length ?? 0;
+			if (outcome.uploaded + outcome.downloaded + merged === 0) return "Univault: already in sync.";
+			const merges = merged ? `, ${merged} merged` : "";
+			return `Univault: synced, ${outcome.uploaded} uploaded, ${outcome.downloaded} downloaded${merges}.`;
+		}
 	}
 }

@@ -2,19 +2,22 @@ import { UnivaultError } from "../errors";
 import type { GitHubClient } from "../github/client";
 import type { UnivaultSettings } from "../settings";
 import type { IndexEntry, StateStore, SyncAnchor } from "../store/db";
-import { download } from "../transfer/download";
+import { merge } from "../merge/engine";
+import { download, readBlob, streamOf } from "../transfer/download";
 import { bootstrapBranch, uploadBlob } from "../transfer/upload";
 import type { VaultAdapter } from "../vault/adapter";
+import { gitBlobSha } from "../vault/hash";
 import { canonicalizeRepoPath } from "../vault/paths";
 import { classifyAll } from "./classify";
-import { commitMessage, createSyncCommit } from "./commit";
+import { type MergeTrailer, commitMessage, createSyncCommit } from "./commit";
 import { type LocalChange, type LocalScan, localDelta } from "./local-delta";
 import { type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
 
 export type SyncState = "idle" | "syncing" | "error";
 
 export type SyncOutcome =
-	| { kind: "synced"; uploaded: number; downloaded: number }
+	// `merged`: paths merged from both sides and uploaded, present only when there are some.
+	| { kind: "synced"; uploaded: number; downloaded: number; merged?: string[] }
 	| { kind: "remote-empty" }
 	| { kind: "needs-setup" }
 	| { kind: "failed"; error: UnivaultError };
@@ -33,6 +36,22 @@ interface Context {
 	client: GitHubClient;
 	login: string;
 	settings: UnivaultSettings;
+}
+
+interface UploadFile {
+	path: string;
+	vaultPath: string;
+	mtime: number;
+	size: number;
+}
+
+type Changed = Extract<LocalChange, { vaultPath: string }>;
+
+interface Merged {
+	// The merge equals theirs: written locally, nothing to upload.
+	downloaded: IndexEntry[];
+	uploads: UploadFile[];
+	trailers: MergeTrailer[];
 }
 
 const REPOSITORY = /^[\w.-]+\/[\w.-]+$/;
@@ -128,11 +147,12 @@ export class Orchestrator {
 
 		const scan = await this.scan(index);
 		const local = scan.changes;
-		const outcomes = classifyAll(local, remote);
+		const outcomes = classifyAll(local, remote, index);
 		const conflicts = [...outcomes].filter(([, o]) => o === "conflict").map(([path]) => path);
 		if (conflicts.length) throw new UnivaultError("conflict-retry", { paths: conflicts.sort() });
 
-		const indexed = sameOnBothSides(outcomes, local, remote);
+		const merged = await this.merge(context, outcomes, local, remote, index);
+		const indexed = [...sameOnBothSides(outcomes, local, remote), ...merged.downloaded];
 		const downloads = [...outcomes].filter(([, o]) => o === "download").map(([path]) => path);
 		for (const path of downloads) {
 			// Expected stat: the scan's for listed files, else the one recorded at the last download
@@ -144,22 +164,31 @@ export class Orchestrator {
 			await download(client, repository, vault, path, (remote.get(path) as { sha: string }).sha, expected);
 		}
 		indexed.push(...(await this.downloadedEntries(downloads, remote)));
+		const downloaded = downloads.length + merged.downloaded.length;
 
-		const uploads = [...outcomes].filter(([, o]) => o === "upload").map(([path]) => path);
-		if (uploads.length === 0) {
+		const uploads: UploadFile[] = [...outcomes]
+			.filter(([, o]) => o === "upload")
+			.map(([path]) => ({ path, ...(local.get(path) as Changed) }));
+		const result = (uploaded: number) => ({
+			kind: "synced" as const,
+			uploaded,
+			downloaded,
+			...(merged.uploads.length ? { merged: merged.uploads.map((u) => u.path) } : {}),
+		});
+		if (uploads.length + merged.uploads.length === 0) {
 			const next: SyncAnchor = { repository, branch, ...head, refEtag: check.etag };
 			if (check.kind === "changed" || check.etag !== anchor?.refEtag || indexed.length) await store.advance(next, indexed);
-			return { kind: "synced", uploaded: 0, downloaded: downloads.length };
+			return result(0);
 		}
 
 		const entries: IndexEntry[] = [];
-		for (const path of uploads) {
-			const change = local.get(path) as Extract<LocalChange, { vaultPath: string }>;
-			const blob = await uploadBlob(client, repository, vault, { path, ...change }, this.deps.uploadCapBytes);
-			entries.push({ path, mtime: change.mtime, size: blob.size, blobSha: blob.sha, mode: FILE_MODE });
+		for (const file of [...uploads, ...merged.uploads]) {
+			const blob = await uploadBlob(client, repository, vault, file, this.deps.uploadCapBytes);
+			entries.push({ path: file.path, mtime: file.mtime, size: blob.size, blobSha: blob.sha, mode: FILE_MODE });
 		}
 		const tree = entries.map((e) => ({ path: e.path, mode: FILE_MODE, type: "blob", sha: e.blobSha }) as const);
-		const commit = await createSyncCommit(client, repository, head, tree, commitMessage(settings.deviceName, login));
+		const message = commitMessage(settings.deviceName, login, merged.trailers);
+		const commit = await createSyncCommit(client, repository, head, tree, message);
 
 		try {
 			await client.updateRef(repository, branch, commit.commitSha);
@@ -169,7 +198,54 @@ export class Orchestrator {
 		}
 		const refEtag = await this.etagFor(client, repository, branch, commit.commitSha);
 		await store.advance({ repository, branch, ...commit, refEtag }, [...entries, ...indexed]);
-		return { kind: "synced", uploaded: entries.length, downloaded: downloads.length };
+		return result(uploads.length);
+	}
+
+	// Writes each merge result over ours, guarded by the scan's stat. A result equal to ours (a
+	// retry after the merged bytes landed) is not rewritten; one equal to theirs is a download.
+	private async merge(
+		context: Context,
+		outcomes: Map<string, string>,
+		local: Map<string, LocalChange>,
+		remote: Map<string, RemoteChange>,
+		index: Map<string, IndexEntry>,
+	): Promise<Merged> {
+		const { client, settings } = context;
+		const { vault } = this.deps;
+		const merged: Merged = { downloaded: [], uploads: [], trailers: [] };
+		const paths = [...outcomes].filter(([, o]) => o === "merge").map(([path]) => path);
+		for (const path of paths.sort()) {
+			const ours = local.get(path) as Changed;
+			const theirs = (remote.get(path) as { sha: string }).sha;
+			const base = (index.get(path) as IndexEntry).blobSha;
+			const result = merge(
+				await readBlob(client, settings.repository, base),
+				await vault.read(ours.vaultPath),
+				await readBlob(client, settings.repository, theirs),
+				path,
+			);
+			if (result.kind === "conflict") throw new UnivaultError("conflict-retry", { paths: [path] });
+
+			const sha = await gitBlobSha(result.bytes);
+			let stat = { mtime: ours.mtime, size: ours.size };
+			if (sha !== ours.blobSha) {
+				await vault.writeChunked(ours.vaultPath, streamOf(result.bytes), stat);
+				stat = await this.statWritten(path, ours.vaultPath);
+			}
+			if (sha === theirs) {
+				merged.downloaded.push({ path, ...stat, blobSha: sha, mode: FILE_MODE });
+			} else {
+				merged.uploads.push({ path, vaultPath: ours.vaultPath, ...stat });
+				merged.trailers.push({ path, base, ours: ours.blobSha, theirs });
+			}
+		}
+		return merged;
+	}
+
+	private async statWritten(path: string, vaultPath: string): Promise<{ mtime: number; size: number }> {
+		const stat = await this.deps.vault.stat(vaultPath);
+		if (!stat) throw new UnivaultError("unknown", { cause: new Error("Written file is missing"), paths: [path] });
+		return stat;
 	}
 
 	// Over-cap files fail the sync by name, as an upload of them would.
@@ -212,8 +288,7 @@ export class Orchestrator {
 	private async downloadedEntries(paths: string[], remote: Map<string, RemoteChange>): Promise<IndexEntry[]> {
 		const entries: IndexEntry[] = [];
 		for (const path of paths) {
-			const stat = await this.deps.vault.stat(path);
-			if (!stat) throw new UnivaultError("unknown", { cause: new Error("Downloaded file is missing"), paths: [path] });
+			const stat = await this.statWritten(path, path);
 			const sha = (remote.get(path) as { sha: string }).sha;
 			entries.push({ path, mtime: stat.mtime, size: stat.size, blobSha: sha, mode: FILE_MODE });
 		}

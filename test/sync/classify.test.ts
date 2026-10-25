@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { IndexEntry } from "../../src/store/db";
 import { type Outcome, classify, classifyAll } from "../../src/sync/classify";
 import type { LocalChange } from "../../src/sync/local-delta";
 import type { RemoteChange } from "../../src/sync/remote-delta";
@@ -71,4 +72,22 @@ it("classifies the union of both deltas", () => {
 		]),
 	);
 	expect(Object.fromEntries(outcomes)).toEqual({ "up.md": "upload", "same.md": "noop", "down.md": "download" });
+});
+
+describe("classify against the index entry", () => {
+	const entry = (blobSha: string): IndexEntry => ({ path: "p", mtime: 1, size: 1, blobSha, mode: "100644" });
+	const C = "c".repeat(40);
+
+	it("merges a path both sides changed to different content", () => {
+		expect(classify(L["modified A"], R["modified B"], entry(C))).toBe("merge");
+	});
+
+	it("treats a remote change back to the base as no remote change", () => {
+		expect(classify(L["modified A"], R["modified B"], entry(B))).toBe("upload");
+		expect(classify(undefined, R["modified B"], entry(B))).toBe("noop");
+	});
+
+	it("keeps both sides reaching the same content a noop", () => {
+		expect(classify(L["modified A"], R["modified A"], entry(C))).toBe("noop");
+	});
 });

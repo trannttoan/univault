@@ -6,6 +6,7 @@ import { FakeVault } from "./vault";
 export class App {
 	readonly vault = new FakeVault();
 	readonly localStorage = new Map<string, unknown>();
+	readonly workspace = new Workspace();
 
 	loadLocalStorage(key: string): unknown {
 		return this.localStorage.has(key) ? structuredClone(this.localStorage.get(key)) : null;
@@ -33,15 +34,46 @@ export interface Command {
 	callback?: () => unknown;
 }
 
+export class Workspace {
+	readonly opened: string[] = [];
+
+	async openLinkText(linktext: string): Promise<void> {
+		this.opened.push(linktext);
+	}
+}
+
 export class FakeElement {
 	text = "";
 	type = "";
 
 	readonly classes: string[] = [];
-	readonly listeners = new Map<string, () => unknown>();
+	readonly listeners = new Map<string, (event?: { preventDefault(): void }) => unknown>();
+	readonly children: FakeElement[] = [];
+
+	constructor(readonly tag = "div") {}
 
 	setText(text: string): void {
 		this.text = text;
+	}
+
+	createEl(tag: string, options: { text?: string } = {}): FakeElement {
+		const el = new FakeElement(tag);
+		el.text = options.text ?? "";
+		this.children.push(el);
+		return el;
+	}
+
+	addEventListener(type: string, callback: (event?: { preventDefault(): void }) => unknown): void {
+		this.listeners.set(type, callback);
+	}
+
+	click(): void {
+		this.listeners.get("click")?.({ preventDefault() {} });
+	}
+
+	// Every element below this one, depth first.
+	descendants(): FakeElement[] {
+		return this.children.flatMap((child) => [child, ...child.descendants()]);
 	}
 
 	addClass(name: string): void {
@@ -53,9 +85,12 @@ export class FakeElement {
 
 export class Notice {
 	static readonly shown: string[] = [];
+	static readonly instances: Notice[] = [];
+	readonly messageEl = new FakeElement();
 
 	constructor(readonly message: string) {
 		Notice.shown.push(message);
+		Notice.instances.push(this);
 	}
 }
 

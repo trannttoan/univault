@@ -59,7 +59,15 @@ export default class UnivaultPlugin extends Plugin {
 		this.notifying = run;
 		const outcome = await run;
 		if (this.notifying === run) this.notifying = null;
-		new Notice(outcomeMessage(outcome));
+		const notice = new Notice(outcomeMessage(outcome));
+		// Phase 6 points Review at the note's history; until then it opens the merged note.
+		for (const path of outcome.kind === "synced" ? (outcome.merged ?? []) : []) {
+			const link = notice.messageEl.createEl("div").createEl("a", { text: `Review ${path}`, href: "#" });
+			link.addEventListener("click", (event) => {
+				event.preventDefault();
+				void this.app.workspace.openLinkText(path, "", false);
+			});
+		}
 		return outcome;
 	}
 
