@@ -79,7 +79,7 @@ describe("two devices pushing within the same second", () => {
 		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", uploaded: 1, conflicts: [NOTE] });
 		expect(text(b.vault.bytes(NOTE))).toBe(ours);
 		expect(text(b.github.file(REPO, "main", "b.md"))).toBe("b from B");
-		expect(await b.orchestrator.conflicts()).toMatchObject([{ path: NOTE, remoteDevice: "A" }]);
+		expect(await b.orchestrator.listConflicts()).toMatchObject([{ path: NOTE, remoteDevice: "A" }]);
 		await kept(before);
 	});
 

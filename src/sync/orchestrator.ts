@@ -93,15 +93,17 @@ export class Orchestrator {
 		this.listeners.push(listener);
 	}
 
-	// Sorted by path. Also refreshes the pending count, e.g. after a restart, unless a sync
-	// is running and will set it itself.
-	async conflicts(): Promise<PendingConflict[]> {
-		const records = await this.deps.store.getConflicts();
-		if (this.state === "idle" || this.state === "conflicts-pending") {
-			this.pendingConflicts = records.length;
-			this.setState(records.length ? "conflicts-pending" : "idle");
-		}
-		return records;
+	// Sorted by path.
+	listConflicts(): Promise<PendingConflict[]> {
+		return this.deps.store.getConflicts();
+	}
+
+	// Takes the pending count from the store, e.g. after a restart. A running sync sets it itself.
+	async refreshConflictState(): Promise<void> {
+		const count = (await this.deps.store.getConflicts()).length;
+		if (this.state !== "idle" && this.state !== "conflicts-pending") return;
+		this.pendingConflicts = count;
+		this.setState(count ? "conflicts-pending" : "idle");
 	}
 
 	// Stores the answer for the next sync to apply, which keeps the picker free of I/O. False
@@ -222,7 +224,7 @@ export class Orchestrator {
 		const conflicts = [...outcomes].filter(([, o]) => o === "conflict").map(([path]) => path);
 		if (conflicts.length && !anchor) return { kind: "first-sync-differs", paths: conflicts.sort() };
 
-		const merged = await this.merge(context, outcomes, local, remote, working, headCommit);
+		const merged = await this.mergeTwoSided(context, outcomes, local, remote, working, headCommit);
 		const indexed = [...applied.index, ...sameOnBothSides(outcomes, local, remote), ...merged.downloaded];
 		const recordChanges = { put: [...refreshed, ...merged.conflicts], remove: applied.resolved };
 		const stillPending = [...pending, ...merged.conflicts].map((r) => r.path).sort();
@@ -279,7 +281,7 @@ export class Orchestrator {
 
 	// Writes each merge result over ours, guarded by the scan's stat. A result equal to ours (a
 	// retry after the merged bytes landed) is not rewritten; one equal to theirs is a download.
-	private async merge(
+	private async mergeTwoSided(
 		context: Context,
 		outcomes: Map<string, string>,
 		local: Map<string, LocalChange>,

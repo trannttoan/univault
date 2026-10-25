@@ -54,7 +54,8 @@ export default class UnivaultPlugin extends Plugin {
 			callback: () => void this.resolveConflicts(),
 		});
 		this.addSettingTab(new UnivaultSettingTab(this.app, this));
-		// Conflicts left unanswered by a force-quit are asked again, without waiting for a sync.
+		// Conflicts left unanswered by a force-quit are shown and asked again, without waiting for a sync.
+		await this.orchestrator.refreshConflictState();
 		this.app.workspace.onLayoutReady(() => void this.resolveConflicts());
 	}
 

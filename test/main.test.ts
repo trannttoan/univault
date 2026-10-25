@@ -164,7 +164,7 @@ describe("UnivaultPlugin", () => {
 
 		Modal.open[0]?.close();
 		await vi.waitFor(() => expect([...app.vault.files.keys()].some((p) => p.startsWith("n (conflict from A "))).toBe(true));
-		await vi.waitFor(async () => expect(await plugin.orchestrator.conflicts()).toEqual([]));
+		await vi.waitFor(async () => expect(await plugin.orchestrator.listConflicts()).toEqual([]));
 		expect(new TextDecoder().decode(github.file("octo/vault", "main", "n.md"))).toBe("line from here\n");
 		expect(Modal.open).toHaveLength(0);
 	});

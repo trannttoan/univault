@@ -49,7 +49,7 @@ export function pickConflict(app: App, conflict: PendingConflict): Promise<Choic
 // `answered` then starts the sync that applies it.
 export async function pickInTurn(app: App, orchestrator: Orchestrator, answered: () => void): Promise<void> {
 	for (;;) {
-		const next = (await orchestrator.conflicts()).find((c) => c.choice === null);
+		const next = (await orchestrator.listConflicts()).find((c) => c.choice === null);
 		if (!next) return;
 		await orchestrator.recordChoice(next, await pickConflict(app, next));
 		answered();

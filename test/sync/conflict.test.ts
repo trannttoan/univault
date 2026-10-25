@@ -14,7 +14,7 @@ const A_TIME = "2026-10-25T07:41:00Z";
 const SIBLING = "Daily note (conflict from A 2026-10-25 14.03).md";
 const text = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes);
 const answer = async (h: Harness, path: string, choice: Choice) =>
-	h.orchestrator.recordChoice((await h.orchestrator.conflicts()).find((c) => c.path === path)!, choice);
+	h.orchestrator.recordChoice((await h.orchestrator.listConflicts()).find((c) => c.path === path)!, choice);
 
 describe("same paragraph edited on two devices", () => {
 	let a: Harness;
@@ -41,7 +41,7 @@ describe("same paragraph edited on two devices", () => {
 		expect(text(b.vault.bytes(NOTE))).toBe(OURS);
 		expect(text(b.github.file(REPO, "main", "other.md"))).toBe("o from B");
 		expect(text(b.github.file(REPO, "main", NOTE))).toBe(THEIRS);
-		const records = await b.orchestrator.conflicts();
+		const records = await b.orchestrator.listConflicts();
 		expect(records).toHaveLength(1);
 		expect(records[0]).toMatchObject({ path: NOTE, kind: "text-overlap", remoteDevice: "A", remoteLogin: "octo", remoteTime: A_TIME, choice: null });
 		expect(text((await b.store.getSnapshot(records[0]!.localSnapshotId!))?.bytes)).toBe(OURS);
@@ -57,12 +57,12 @@ describe("same paragraph edited on two devices", () => {
 
 		const snapshots = await b.store.getSnapshots();
 		expect(snapshots.map((s) => [s.reason, text(s.bytes)])).toEqual([["conflict-local", OURS]]);
-		expect((await b.orchestrator.conflicts())[0]?.localSnapshotId).toBe(snapshots[0]?.id);
+		expect((await b.orchestrator.listConflicts())[0]?.localSnapshotId).toBe(snapshots[0]?.id);
 	});
 
 	it("shows one picker naming the file, the other device and the time; dismissing it keeps both on both devices", async () => {
 		await b.orchestrator.sync("manual");
-		const [record] = await b.orchestrator.conflicts();
+		const [record] = await b.orchestrator.listConflicts();
 		const app = new FakeApp();
 		const choice = pickConflict(app as unknown as App, record!);
 
@@ -82,7 +82,7 @@ describe("same paragraph edited on two devices", () => {
 			expect(text(device.vault.bytes(NOTE))).toBe(OURS);
 			expect(text(device.vault.bytes(SIBLING))).toBe(THEIRS);
 		}
-		expect(await b.orchestrator.conflicts()).toEqual([]);
+		expect(await b.orchestrator.listConflicts()).toEqual([]);
 
 		b.github.requests.length = 0;
 		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
@@ -120,7 +120,7 @@ describe("same paragraph edited on two devices", () => {
 		expect(b.github.requests.filter((r) => r.method === "POST" && r.path.endsWith("/git/commits"))).toHaveLength(1);
 		await a.orchestrator.sync("manual");
 		for (const device of [a, b]) expect(text(device.vault.bytes(NOTE))).toBe(OURS);
-		expect(await b.orchestrator.conflicts()).toEqual([]);
+		expect(await b.orchestrator.listConflicts()).toEqual([]);
 		expect([...b.vault.files.keys()].some((p) => p.includes("conflict from"))).toBe(false);
 	});
 
@@ -133,7 +133,7 @@ describe("same paragraph edited on two devices", () => {
 		expect(b.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
 		await a.orchestrator.sync("manual");
 		for (const device of [a, b]) expect(text(device.vault.bytes(NOTE))).toBe(THEIRS);
-		expect(await b.orchestrator.conflicts()).toEqual([]);
+		expect(await b.orchestrator.listConflicts()).toEqual([]);
 
 		b.github.requests.length = 0;
 		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
@@ -148,7 +148,7 @@ describe("same paragraph edited on two devices", () => {
 
 		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: [NOTE] });
 		expect(text(b.vault.bytes(NOTE))).toBe(edited);
-		const [record] = await b.orchestrator.conflicts();
+		const [record] = await b.orchestrator.listConflicts();
 		expect(record).toMatchObject({ choice: null, localSha: await gitBlobSha(new TextEncoder().encode(edited)) });
 		expect(text((await b.store.getSnapshot(record!.localSnapshotId!))?.bytes)).toBe(edited);
 
@@ -157,7 +157,7 @@ describe("same paragraph edited on two devices", () => {
 		await answer(b, NOTE, await choice);
 		await b.orchestrator.sync("manual");
 		expect(text(b.vault.bytes(NOTE))).toBe(THEIRS);
-		expect(await b.orchestrator.conflicts()).toEqual([]);
+		expect(await b.orchestrator.listConflicts()).toEqual([]);
 	});
 
 	it("keep theirs still applies when the note was only touched, not edited", async () => {
@@ -167,12 +167,12 @@ describe("same paragraph edited on two devices", () => {
 
 		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
 		expect(text(b.vault.bytes(NOTE))).toBe(THEIRS);
-		expect(await b.orchestrator.conflicts()).toEqual([]);
+		expect(await b.orchestrator.listConflicts()).toEqual([]);
 	});
 
 	it("offers keep mine, keep theirs and keep both, and records the one clicked", async () => {
 		await b.orchestrator.sync("manual");
-		const [record] = await b.orchestrator.conflicts();
+		const [record] = await b.orchestrator.listConflicts();
 		const app = new FakeApp() as unknown as App;
 		for (const [label, expected] of [["Keep mine", "mine"], ["Keep theirs", "theirs"], ["Keep both", "both"]] as const) {
 			const choice = pickConflict(app, record!);
@@ -190,7 +190,7 @@ describe("same paragraph edited on two devices", () => {
 		await a.orchestrator.sync("manual");
 
 		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: [NOTE] });
-		const records = await b.orchestrator.conflicts();
+		const records = await b.orchestrator.listConflicts();
 		expect(records).toHaveLength(1);
 		expect(records[0]).toMatchObject({ remoteSha: await gitBlobSha(new TextEncoder().encode(again)), choice: null });
 		expect(text(b.vault.bytes(NOTE))).toBe(OURS);
@@ -198,13 +198,13 @@ describe("same paragraph edited on two devices", () => {
 
 	it("drops an answer given in a picker opened before A pushed the note again", async () => {
 		await b.orchestrator.sync("manual");
-		const [shown] = await b.orchestrator.conflicts();
+		const [shown] = await b.orchestrator.listConflicts();
 		a.vault.setFile(NOTE, "Morning, first line from A, edited again.\nMorning, second line.\n\nEvening.\n");
 		await a.orchestrator.sync("manual");
 		await b.orchestrator.sync("manual");
 
 		expect(await b.orchestrator.recordChoice(shown!, "mine")).toBe(false);
-		expect((await b.orchestrator.conflicts())[0]).toMatchObject({ choice: null });
+		expect((await b.orchestrator.listConflicts())[0]).toMatchObject({ choice: null });
 		expect(await answer(b, NOTE, "mine")).toBe(true);
 	});
 
@@ -227,7 +227,7 @@ describe("same paragraph edited on two devices", () => {
 		expect(outcome).toEqual({ kind: "synced", uploaded: 1, downloaded: 1 });
 		expect(text(b.vault.bytes(NOTE))).toBe(again);
 		expect(text(b.github.file(REPO, "main", NOTE))).toBe(again);
-		expect(await b.orchestrator.conflicts()).toEqual([]);
+		expect(await b.orchestrator.listConflicts()).toEqual([]);
 	});
 
 	it("finishes a written keep both when A pushes again, then merges A's newer version into B's", async () => {
@@ -239,7 +239,7 @@ describe("same paragraph edited on two devices", () => {
 		expect(text(b.vault.bytes(NOTE))).toBe(merged);
 		expect(text(b.github.file(REPO, "main", NOTE))).toBe(merged);
 		expect(text(b.github.file(REPO, "main", SIBLING))).toBe(THEIRS);
-		expect(await b.orchestrator.conflicts()).toEqual([]);
+		expect(await b.orchestrator.listConflicts()).toEqual([]);
 	});
 
 	it("does not upload a local edit to a pending note", async () => {
@@ -272,7 +272,7 @@ describe("same paragraph edited on two devices", () => {
 		await done;
 
 		expect(answered).toBe(2);
-		expect((await b.orchestrator.conflicts()).map((c) => [c.path, c.choice])).toEqual([
+		expect((await b.orchestrator.listConflicts()).map((c) => [c.path, c.choice])).toEqual([
 			[NOTE, "mine"],
 			["other.md", "both"],
 		]);
@@ -308,7 +308,7 @@ describe("two-sided changes that are never merged", () => {
 
 		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: [path] });
 		expect(blobReads(b)).toEqual([]);
-		const [record] = await b.orchestrator.conflicts();
+		const [record] = await b.orchestrator.listConflicts();
 		expect(record).toMatchObject({ path, kind });
 		expect(record?.localSnapshotId === null).toBe(path.startsWith("big."));
 
@@ -324,7 +324,7 @@ describe("two-sided changes that are never merged", () => {
 		b.vault.setFile("big.md", `from B\n\n${"x".repeat(40)}`);
 
 		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: ["big.md"] });
-		expect((await b.orchestrator.conflicts())[0]).toMatchObject({ kind: "text-overlap" });
+		expect((await b.orchestrator.listConflicts())[0]).toMatchObject({ kind: "text-overlap" });
 		expect(text(b.vault.bytes("big.md"))).toBe(`from B\n\n${"x".repeat(40)}`);
 	});
 
@@ -336,13 +336,13 @@ describe("two-sided changes that are never merged", () => {
 			await a.orchestrator.sync("manual");
 			b.vault.setFile(DAILY, "# Today\n\nFrom B.\n");
 			expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: [DAILY] });
-			expect((await b.orchestrator.conflicts())[0]).toMatchObject({ path: DAILY, baseSha: null, kind: "text-overlap" });
+			expect((await b.orchestrator.listConflicts())[0]).toMatchObject({ path: DAILY, baseSha: null, kind: "text-overlap" });
 		});
 
 		const converge = async () => {
 			await b.orchestrator.sync("manual");
 			await a.orchestrator.sync("manual");
-			expect(await b.orchestrator.conflicts()).toEqual([]);
+			expect(await b.orchestrator.listConflicts()).toEqual([]);
 			expect(a.vault.bytes(DAILY)).toEqual(b.vault.bytes(DAILY));
 		};
 
@@ -374,6 +374,6 @@ describe("two-sided changes that are never merged", () => {
 
 		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
 		expect(b.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
-		expect(await b.orchestrator.conflicts()).toEqual([]);
+		expect(await b.orchestrator.listConflicts()).toEqual([]);
 	});
 });
