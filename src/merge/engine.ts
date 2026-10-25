@@ -9,6 +9,9 @@ export type MergeResult = { kind: "merged"; bytes: Uint8Array } | { kind: "confl
 export const MAX_EDIT_LENGTH = 1000;
 // Per side; the caller checks it before reading, since a merge holds all three sides at once.
 export const MERGE_CAP_BYTES = 1024 * 1024;
+// Per side. Memory grows with the line count, so a note of very short lines needs this bound
+// as well as the byte cap to stay within the mobile budget.
+export const MAX_LINES = 50_000;
 
 // Extensions that are binary for certain, so large media is never sniffed. Nothing is ever
 // text by extension.
@@ -62,6 +65,7 @@ export function splitLines(text: string): string[] {
 // lines or the same paragraph (a run of non-blank base lines); identical edits agree.
 export function merge(base: Uint8Array, ours: Uint8Array, theirs: Uint8Array, path: string): MergeResult {
 	if (isBinaryPath(path)) return { kind: "conflict", detail: "binary" };
+	if ([base, ours, theirs].some((bytes) => lineCount(bytes) > MAX_LINES)) return { kind: "conflict", detail: "too-large" };
 	const texts = [base, ours, theirs].map(decodeText);
 	if (texts.some((t) => t === null)) return { kind: "conflict", detail: "binary" };
 	const [baseLines, oursLines, theirsLines] = (texts as string[]).map(splitLines) as [string[], string[], string[]];
@@ -139,6 +143,12 @@ function stack(theirs: string[], ours: string[]): string[] | null {
 		else if (head > 0) head--;
 		else return null;
 	}
+}
+
+function lineCount(bytes: Uint8Array): number {
+	let count = 1;
+	for (const byte of bytes) if (byte === 0x0a) count++;
+	return count;
 }
 
 function hunks(base: string[], side: string[]): Hunk[] | null {

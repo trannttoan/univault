@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_EDIT_LENGTH, merge, splitLines } from "../../src/merge/engine";
+import { MAX_EDIT_LENGTH, MAX_LINES, merge, splitLines } from "../../src/merge/engine";
 
 const enc = (text: string) => new TextEncoder().encode(text);
 const run = (base: string, ours: string, theirs: string) => {
@@ -65,6 +65,13 @@ describe("merge", () => {
 
 	it("keeps a BOM as part of the first line", () => {
 		expect(run("\uFEFFone\n\ntwo\n", "\uFEFFONE\n\ntwo\n", "\uFEFFone\n\nTWO\n")).toBe("\uFEFFONE\n\nTWO\n");
+	});
+
+	it("gives up past the line cap on any side, however short the lines", () => {
+		const atCap = "a\n".repeat(MAX_LINES - 1);
+		expect(run(atCap, `${atCap}b`, atCap)).toBe(`${atCap}b`);
+		expect(run(atCap, `${atCap}a\n`, atCap)).toEqual({ kind: "conflict", detail: "too-large" });
+		expect(run(`${atCap}a\n`, atCap, atCap)).toEqual({ kind: "conflict", detail: "too-large" });
 	});
 
 	it("gives up past the edit cap on either side", () => {
