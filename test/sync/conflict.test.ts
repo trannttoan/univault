@@ -193,6 +193,40 @@ describe("same paragraph edited on two devices", () => {
 		expect(text(b.vault.bytes(NOTE))).toBe(OURS);
 	});
 
+	// B's answer is written to disk, its push fails, and A pushes the note again before B retries.
+	const answerThenFailedPush = async (choice: "theirs" | "both", again: string) => {
+		await b.orchestrator.sync("manual");
+		await b.orchestrator.resolve(NOTE, choice);
+		b.vault.setFile("other.md", "o from B, again");
+		b.github.inject("PATCH", /git\/refs/, "network");
+		expect((await b.orchestrator.sync("manual")).kind).toBe("failed");
+		a.vault.setFile(NOTE, again);
+		await a.orchestrator.sync("manual");
+		return b.orchestrator.sync("manual");
+	};
+
+	it("finishes a written keep theirs when A pushes again, then takes A's newer version", async () => {
+		const again = "Morning, first line from A, edited again.\nMorning, second line.\n\nEvening.\n";
+		const outcome = await answerThenFailedPush("theirs", again);
+
+		expect(outcome).toEqual({ kind: "synced", uploaded: 1, downloaded: 1 });
+		expect(text(b.vault.bytes(NOTE))).toBe(again);
+		expect(text(b.github.file(REPO, "main", NOTE))).toBe(again);
+		expect(await b.orchestrator.conflicts()).toEqual([]);
+	});
+
+	it("finishes a written keep both when A pushes again, then merges A's newer version into B's", async () => {
+		const again = "Morning, first line from A.\nMorning, second line.\n\nEvening, from A.\n";
+		const outcome = await answerThenFailedPush("both", again);
+
+		const merged = "Morning, first line.\nMorning, second line from B.\n\nEvening, from A.\n";
+		expect(outcome).toMatchObject({ kind: "synced", merged: [NOTE] });
+		expect(text(b.vault.bytes(NOTE))).toBe(merged);
+		expect(text(b.github.file(REPO, "main", NOTE))).toBe(merged);
+		expect(text(b.github.file(REPO, "main", SIBLING))).toBe(THEIRS);
+		expect(await b.orchestrator.conflicts()).toEqual([]);
+	});
+
 	it("does not upload a local edit to a pending note", async () => {
 		await b.orchestrator.sync("manual");
 		b.vault.setFile(NOTE, `${OURS}more\n`);

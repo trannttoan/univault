@@ -192,13 +192,18 @@ export class Orchestrator {
 		// user's choice is applied; the rest of the vault syncs around it.
 		// Theirs moved again since the picker was answered: the old answer no longer applies.
 		const refreshed: PendingConflict[] = [];
-		const records = (await store.getConflicts()).map((record) => {
+		const records: PendingConflict[] = [];
+		for (const record of await store.getConflicts()) {
 			const change = remote.get(record.path);
-			if (!change || change.kind === "removed" || change.sha === record.remoteSha) return record;
+			const moved = change !== undefined && change.kind !== "removed" && change.sha !== record.remoteSha;
+			if (!moved || (await this.answerWritten(record))) {
+				records.push(record);
+				continue;
+			}
 			const update = { ...record, remoteSha: change.sha, ...remoteAuthor(headCommit), choice: null, siblingPath: null };
 			refreshed.push(update);
-			return update;
-		});
+			records.push(update);
+		}
 		const applied = await this.applyChoices(context, records, index, remote);
 		const working = new Map(index);
 		for (const entry of applied.index) working.set(entry.path, entry);
@@ -393,6 +398,15 @@ export class Orchestrator {
 			applied.resolved.push(record.path);
 		}
 		return applied;
+	}
+
+	// Keep theirs or keep both already wrote the theirs the user saw. Asking again would lose
+	// ours from disk, so that answer is finished and the newer theirs syncs as a normal change.
+	private async answerWritten(record: PendingConflict): Promise<boolean> {
+		const { vault } = this.deps;
+		if (record.choice === "both") return record.siblingPath !== null && (await vault.exists(record.siblingPath));
+		if (record.choice !== "theirs" || !(await vault.stat(record.path))) return false;
+		return (await gitBlobSha(await vault.read(record.path))) === record.remoteSha;
 	}
 
 	// Replaces ours with theirs only if ours is still what the user saw in the picker. If it was
