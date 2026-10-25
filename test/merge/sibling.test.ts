@@ -21,6 +21,21 @@ describe("siblingPath", () => {
 		expect(siblingPath("archive.tar.gz", "Phone", WHEN)).toBe("archive.tar (conflict from Phone 2026-10-25 09.05).gz");
 	});
 
+	it("keeps the file name under 200 bytes however long the device or note name is", () => {
+		const bytes = (path: string) => new TextEncoder().encode(path.slice(path.lastIndexOf("/") + 1)).length;
+		const device = siblingPath("a.md", "é".repeat(300), WHEN);
+		expect(device).toBe(`a (conflict from ${"é".repeat(32)} 2026-10-25 09.05).md`);
+		const note = siblingPath(`notes/${"n".repeat(250)}.md`, "Phone", WHEN, 2);
+		expect(bytes(note)).toBeLessThanOrEqual(200);
+		expect(note).toMatch(/^notes\/n+ \(conflict from Phone 2026-10-25 09\.05 2\)\.md$/);
+	});
+
+	it("drops invisible format characters and returns NFC", () => {
+		expect(siblingPath("a.md", "Ph\u202Eone\u200B", WHEN)).toBe("a (conflict from Ph-one- 2026-10-25 09.05).md");
+		const nfd = siblingPath("Cafe\u0301.md", "Ange\u0301", WHEN);
+		expect(nfd).toBe("Caf\u00e9 (conflict from Ang\u00e9 2026-10-25 09.05).md");
+	});
+
 	it("numbers a second copy from the same minute", () => {
 		expect(siblingPath("a.md", "Phone", WHEN, 2)).toBe("a (conflict from Phone 2026-10-25 09.05 2).md");
 	});
