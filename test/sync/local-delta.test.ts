@@ -82,4 +82,16 @@ describe("localDelta", () => {
 		expect([...delta.keys()]).toEqual(["caf\u00e9.md"]);
 		expect(delta.get("caf\u00e9.md")).toMatchObject({ kind: "added", vaultPath: "cafe\u0301.md" });
 	});
+
+	it("skips a file whose name holds a line break, which no repository path may", async () => {
+		const vault = new FakeVault();
+		vault.setFile("fine.md", "a");
+		vault.setFile("two\nlines.md", "b");
+		vault.setFile("carriage\rreturn.md", "c");
+
+		const { changes, files } = await localDelta(new ObsidianVaultAdapter(vault), new Map(), CAP);
+
+		expect([...changes.keys()]).toEqual(["fine.md"]);
+		expect([...files.keys()]).toEqual(["fine.md"]);
+	});
 });

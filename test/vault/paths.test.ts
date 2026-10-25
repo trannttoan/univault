@@ -28,6 +28,8 @@ describe("canonicalizeRepoPath", () => {
 		"a/",
 		"",
 		"a\0b.md",
+		"a\nb.md",
+		"a\rb.md",
 		".obsidian",
 		".obsidian/app.json",
 		".OBSIDIAN/x",

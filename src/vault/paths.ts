@@ -16,7 +16,8 @@ export function canonicalizeRepoPath(raw: string, configDir: string, pluginDir: 
 	const unsafe =
 		path.startsWith("/") ||
 		/^[a-z]:/i.test(path) ||
-		path.includes("\0") ||
+		// A newline would also break the Univault-Merge trailer naming the path.
+		/[\0\r\n]/.test(path) ||
 		segments.some((s) => s === "" || s === "." || s === "..") ||
 		isWithin(lower, configDir.toLowerCase()) ||
 		isWithin(lower, pluginDir.toLowerCase()) ||

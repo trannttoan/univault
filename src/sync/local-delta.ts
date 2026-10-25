@@ -28,6 +28,8 @@ export async function localDelta(
 
 	for (const file of await vault.list()) {
 		const path = normalizeVaultPath(file.path);
+		// The repository refuses such a path, and a commit trailer naming it would break.
+		if (/[\r\n]/.test(path)) continue;
 		seen.set(path, file);
 		const entry = index.get(path);
 		if (entry && entry.mtime === file.mtime && entry.size === file.size) continue;

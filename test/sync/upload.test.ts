@@ -97,6 +97,14 @@ describe("upload cycle", () => {
 		expect(await h.store.getIndex()).toEqual(index);
 	});
 
+	it("does not upload a vault file whose name holds a line break", async () => {
+		await h.inSync({ "a.md": "a" });
+		h.vault.setFile("bad\nname.md", "x");
+
+		expect(await h.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
+		expect(h.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
+	});
+
 	it("refuses an upload when GitHub's blob id differs from the local hash", async () => {
 		const head = await h.inSync({ "a.md": "before" });
 		h.vault.setFile("a.md", "after");
