@@ -5,7 +5,8 @@ export type ConflictDetail = "overlap" | "binary" | "too-large";
 export type MergeResult = { kind: "merged"; bytes: Uint8Array } | { kind: "conflict"; detail: ConflictDetail };
 
 // Past this many inserted plus removed lines per side the diff gives up and the user decides.
-export const MAX_EDIT_LENGTH = 2000;
+// Measured on the dev Mac at 1 MB: about 65 ms at 1,000, 210 ms at 2,000.
+export const MAX_EDIT_LENGTH = 1000;
 // Per side; the caller checks it before reading, since a merge holds all three sides at once.
 export const MERGE_CAP_BYTES = 1024 * 1024;
 
@@ -57,8 +58,8 @@ export function splitLines(text: string): string[] {
 	return lines;
 }
 
-// Pure three-way merge of one file. Two edits conflict when they touch the same base lines or
-// the same paragraph (a run of non-blank base lines); edits made identically on both sides agree.
+// Pure three-way merge of one file (ADR-003). Two edits conflict when they touch the same base
+// lines or the same paragraph (a run of non-blank base lines); identical edits agree.
 export function merge(base: Uint8Array, ours: Uint8Array, theirs: Uint8Array, path: string): MergeResult {
 	if (isBinaryPath(path)) return { kind: "conflict", detail: "binary" };
 	const texts = [base, ours, theirs].map(decodeText);
@@ -74,26 +75,70 @@ export function merge(base: Uint8Array, ours: Uint8Array, theirs: Uint8Array, pa
 	const others = theirsHunks.filter((t) => !agreed.has(t));
 	const para = paragraphs(baseLines);
 	const theirFootprints = others.map((t) => footprint(t, para));
+	// Hunks whose lines are replaced at output: same-point insertions become one hunk of theirs'
+	// lines then ours', and an insertion the other side's touching edit already holds is dropped.
+	const replaced = new Map<Hunk, string[]>();
 	for (const o of mine) {
 		const mineFootprint = footprint(o, para);
 		for (const [i, t] of others.entries()) {
-			if (clash(o, t, mineFootprint, theirFootprints[i] ?? null)) return { kind: "conflict", detail: "overlap" };
+			if (overlaps(mineFootprint, theirFootprints[i] ?? null) || (o.start < t.end && t.start < o.end)) {
+				return { kind: "conflict", detail: "overlap" };
+			}
+			const touching = o.end === t.start || t.end === o.start;
+			if (!touching) continue;
+			const oInsert = o.start === o.end;
+			const tInsert = t.start === t.end;
+			if (oInsert && tInsert) {
+				// Both filled an empty file: like a file added on both sides, the user decides.
+				const lines = o.start > 0 ? stack(t.lines, o.lines) : null;
+				if (!lines) return { kind: "conflict", detail: "overlap" };
+				replaced.set(t, lines);
+				replaced.set(o, []);
+			} else if (oInsert || tInsert) {
+				// A re-merge: ours may hold theirs' insertion inside a neighboring edit, or the reverse.
+				const [insert, edit] = oInsert ? [o, t] : [t, o];
+				const holds = edit.end === insert.start ? endsWith(edit.lines, insert.lines) : startsWith(edit.lines, insert.lines);
+				if (holds) replaced.set(insert, []);
+				else if (sharesText(edit.lines, insert.lines)) return { kind: "conflict", detail: "overlap" };
+			}
 		}
 	}
 
-	// Theirs before ours at a shared insertion point: theirs was pushed first.
-	const ordered = [...theirsHunks.map((h) => ({ h, side: 0 })), ...mine.map((h) => ({ h, side: 1 }))].sort(
-		(a, b) => a.h.start - b.h.start || a.h.end - b.h.end || a.side - b.side,
-	);
+	const ordered = [...theirsHunks, ...mine].sort((a, b) => a.start - b.start || a.end - b.end);
 	const out: string[] = [];
 	let pos = 0;
-	for (const { h } of ordered) {
+	for (const h of ordered) {
 		for (; pos < h.start; pos++) out.push(baseLines[pos] as string);
-		for (const line of h.lines) out.push(line);
+		for (const line of replaced.get(h) ?? h.lines) out.push(line);
 		pos = h.end;
 	}
 	for (; pos < baseLines.length; pos++) out.push(baseLines[pos] as string);
 	return { kind: "merged", bytes: encoder.encode(out.join("")) };
+}
+
+// Theirs first, as it was pushed first. What both inserted at the start or the end is kept
+// once, so re-merging a stacked result, or a newer theirs that grew the same insertion, adds
+// nothing twice. The trim backs off until the two remainders meet at a blank line, so stacked
+// paragraphs stay separate paragraphs.
+function stack(theirs: string[], ours: string[]): string[] | null {
+	let head = 0;
+	while (head < theirs.length && head < ours.length && theirs[head] === ours[head]) head++;
+	let tail = 0;
+	const fits = () => tail < theirs.length - head && tail < ours.length - head;
+	while (fits() && theirs[theirs.length - 1 - tail] === ours[ours.length - 1 - tail]) tail++;
+	for (;;) {
+		const theirsRest = theirs.slice(head, theirs.length - tail);
+		const oursRest = ours.slice(head, ours.length - tail);
+		if (sharesText(theirsRest, oursRest)) return null;
+		const last = theirsRest[theirsRest.length - 1];
+		const first = oursRest[0];
+		if (last === undefined || first === undefined || isBlank(last) || isBlank(first)) {
+			return [...theirs.slice(0, head), ...theirsRest, ...oursRest, ...theirs.slice(theirs.length - tail)];
+		}
+		if (tail > 0) tail--;
+		else if (head > 0) head--;
+		else return null;
+	}
 }
 
 function hunks(base: string[], side: string[]): Hunk[] | null {
@@ -126,11 +171,23 @@ function sameHunk(a: Hunk, b: Hunk): boolean {
 	return a.start === b.start && a.end === b.end && a.lines.length === b.lines.length && a.lines.every((l, i) => l === b.lines[i]);
 }
 
-function clash(a: Hunk, b: Hunk, aPara: [number, number] | null, bPara: [number, number] | null): boolean {
-	if (a.start < b.end && b.start < a.end) return true;
-	// Same-point insertions are stacked theirs-then-ours, which needs ours to open with a terminator.
-	if (a.start === a.end && b.start === b.end && a.start === b.start && !/^\r?\n/.test(a.lines[0] ?? "")) return true;
-	return aPara !== null && bPara !== null && aPara[0] <= bPara[1] && bPara[0] <= aPara[1];
+function startsWith(lines: string[], part: string[]): boolean {
+	return part.length <= lines.length && part.every((line, i) => line === lines[i]);
+}
+
+function endsWith(lines: string[], part: string[]): boolean {
+	const offset = lines.length - part.length;
+	return offset >= 0 && part.every((line, i) => line === lines[offset + i]);
+}
+
+// Whether two runs of lines have a non-blank line in common.
+function sharesText(a: string[], b: string[]): boolean {
+	const text = new Set(a.filter((line) => !isBlank(line)));
+	return b.some((line) => text.has(line));
+}
+
+function overlaps(a: [number, number] | null, b: [number, number] | null): boolean {
+	return a !== null && b !== null && a[0] <= b[1] && b[0] <= a[1];
 }
 
 function isBlank(line: string): boolean {
