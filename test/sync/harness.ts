@@ -40,6 +40,7 @@ export async function createDevice(github: FakeGitHub, deviceName: string) {
 		states: [] as SyncState[],
 		// The device clock, for sibling names and snapshot times; null is the real clock.
 		now: null as (() => Date) | null,
+		mergeCapBytes: 1024,
 		orchestrator: null as unknown as Orchestrator,
 		// Vault and branch agree, and the anchor holds the current ref ETag.
 		async inSync(files: Record<string, string | Uint8Array>): Promise<string> {
@@ -74,6 +75,9 @@ export async function createDevice(github: FakeGitHub, deviceName: string) {
 		configDir: ".obsidian",
 		pluginDir: ".obsidian/plugins/univault",
 		now: () => h.now?.() ?? new Date(),
+		get mergeCapBytes() {
+			return h.mergeCapBytes;
+		},
 	});
 	h.orchestrator.onChange(() => h.states.push(h.orchestrator.state));
 	return h;

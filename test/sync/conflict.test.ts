@@ -209,3 +209,101 @@ describe("same paragraph edited on two devices", () => {
 		]);
 	});
 });
+
+describe("two-sided changes that are never merged", () => {
+	let a: Harness;
+	let b: Harness;
+	const blobReads = (h: Harness) => h.github.requests.filter((r) => r.method === "GET" && r.path.includes("/git/blobs/"));
+
+	beforeEach(async () => {
+		Modal.open.length = 0;
+		a = await createHarness();
+		a.settings.deviceName = "A";
+		const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1]);
+		await a.inSync({ "pic.png": png, "nul.md": "a\0\n", "big.md": "x".repeat(40), "plain.md": "p" });
+		b = await a.fork("B");
+		b.now = () => new Date(2026, 9, 25, 14, 3);
+	});
+
+	it.each([
+		["pic.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 2]), new Uint8Array([0x89, 0x50, 0x4e, 0x47, 3]), "binary"],
+		["nul.md", "a\0\nfrom A\n", "a\0\nfrom B\n", "binary"],
+		["big.md", `${"x".repeat(40)}\n\nfrom A`, `from B\n\n${"x".repeat(40)}`, "text-overlap"],
+	] as const)("%s changed on both sides opens a picker without reading a blob", async (path, theirs, ours, kind) => {
+		b.mergeCapBytes = 32;
+		a.vault.setFile(path, theirs);
+		await a.orchestrator.sync("manual");
+		b.vault.setFile(path, ours);
+		b.github.requests.length = 0;
+
+		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: [path] });
+		expect(blobReads(b)).toEqual([]);
+		const [record] = await b.orchestrator.conflicts();
+		expect(record).toMatchObject({ path, kind });
+		expect(record?.localSnapshotId === null).toBe(path === "big.md");
+
+		const app = new FakeApp() as unknown as App;
+		void pickConflict(app, record!);
+		expect(Modal.open[0]?.text()).toContain(path);
+	});
+
+	it("does not merge when theirs is over the cap, and stops reading it there", async () => {
+		b.mergeCapBytes = 48;
+		a.vault.setFile("big.md", `${"x".repeat(40)}\n\n${"y".repeat(40)}`);
+		await a.orchestrator.sync("manual");
+		b.vault.setFile("big.md", `from B\n\n${"x".repeat(40)}`);
+
+		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: ["big.md"] });
+		expect((await b.orchestrator.conflicts())[0]).toMatchObject({ kind: "text-overlap" });
+		expect(text(b.vault.bytes("big.md"))).toBe(`from B\n\n${"x".repeat(40)}`);
+	});
+
+	describe("a daily note created on both devices", () => {
+		const DAILY = "2026-10-25.md";
+
+		beforeEach(async () => {
+			a.vault.setFile(DAILY, "# Today\n\nFrom A.\n");
+			await a.orchestrator.sync("manual");
+			b.vault.setFile(DAILY, "# Today\n\nFrom B.\n");
+			expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: [DAILY] });
+			expect((await b.orchestrator.conflicts())[0]).toMatchObject({ path: DAILY, baseSha: null, kind: "text-overlap" });
+		});
+
+		const converge = async () => {
+			await b.orchestrator.sync("manual");
+			await a.orchestrator.sync("manual");
+			expect(await b.orchestrator.conflicts()).toEqual([]);
+			expect(a.vault.bytes(DAILY)).toEqual(b.vault.bytes(DAILY));
+		};
+
+		it("keep mine", async () => {
+			await b.orchestrator.resolve(DAILY, "mine");
+			await converge();
+			expect(text(a.vault.bytes(DAILY))).toBe("# Today\n\nFrom B.\n");
+		});
+
+		it("keep theirs", async () => {
+			await b.orchestrator.resolve(DAILY, "theirs");
+			await converge();
+			expect(text(a.vault.bytes(DAILY))).toBe("# Today\n\nFrom A.\n");
+		});
+
+		it("keep both", async () => {
+			await b.orchestrator.resolve(DAILY, "both");
+			await converge();
+			expect(text(a.vault.bytes(DAILY))).toBe("# Today\n\nFrom B.\n");
+			expect(text(a.vault.bytes("2026-10-25 (conflict from A 2026-10-25 14.03).md"))).toBe("# Today\n\nFrom A.\n");
+		});
+	});
+
+	it("keeps identical content created on both devices a silent noop", async () => {
+		a.vault.setFile("same.md", "same");
+		await a.orchestrator.sync("manual");
+		b.vault.setFile("same.md", "same");
+		b.github.requests.length = 0;
+
+		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
+		expect(b.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
+		expect(await b.orchestrator.conflicts()).toEqual([]);
+	});
+});

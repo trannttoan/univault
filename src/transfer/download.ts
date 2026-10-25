@@ -13,9 +13,33 @@ export async function download(
 	await vault.writeChunked(path, await client.getBlobStream(repository, sha), expected);
 }
 
-// Whole blob on the heap, for the merge engine.
-export async function readBlob(client: GitHubClient, repository: string, sha: string): Promise<Uint8Array> {
-	return new Uint8Array(await new Response(await client.getBlobStream(repository, sha)).arrayBuffer());
+// Whole blob on the heap, for the merge engine; null as soon as it passes `capBytes`.
+export async function readBlob(
+	client: GitHubClient,
+	repository: string,
+	sha: string,
+	capBytes: number,
+): Promise<Uint8Array | null> {
+	const reader = (await client.getBlobStream(repository, sha)).getReader();
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.byteLength;
+		if (size > capBytes) {
+			await reader.cancel();
+			return null;
+		}
+		chunks.push(value);
+	}
+	const bytes = new Uint8Array(size);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return bytes;
 }
 
 export function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {

@@ -3,7 +3,7 @@ import type { GitHubClient } from "../github/client";
 import type { Commit } from "../github/types";
 import type { UnivaultSettings } from "../settings";
 import type { IndexEntry, PendingConflict, Snapshot, StateStore, SyncAnchor } from "../store/db";
-import { merge } from "../merge/engine";
+import { MERGE_CAP_BYTES, type MergeResult, decodeText, isBinaryPath, merge } from "../merge/engine";
 import { siblingPath } from "../merge/sibling";
 import { download, readBlob, streamOf } from "../transfer/download";
 import { bootstrapBranch, uploadBlob } from "../transfer/upload";
@@ -34,6 +34,8 @@ export interface OrchestratorDeps {
 	configDir: string;
 	pluginDir: string;
 	now?: () => Date;
+	// Per-side size above which a two-sided change goes to the picker unmerged.
+	mergeCapBytes?: number;
 }
 
 interface Context {
@@ -208,8 +210,10 @@ export class Orchestrator {
 			remote.delete(path);
 		}
 		const outcomes = classifyAll(local, remote, working);
+		// Without an anchor every difference is base-less; a picker per file is the wrong tool
+		// for a vault being joined to a populated repository, so that sync still refuses.
 		const conflicts = [...outcomes].filter(([, o]) => o === "conflict").map(([path]) => path);
-		if (conflicts.length) throw new UnivaultError("conflict-retry", { paths: conflicts.sort() });
+		if (conflicts.length && !anchor) throw new UnivaultError("conflict-retry", { paths: conflicts.sort() });
 
 		const merged = await this.merge(context, outcomes, local, remote, working, headCommit);
 		const indexed = [...applied.index, ...sameOnBothSides(outcomes, local, remote), ...merged.downloaded];
@@ -279,20 +283,27 @@ export class Orchestrator {
 		const { client, settings } = context;
 		const { vault } = this.deps;
 		const merged: Merged = { downloaded: [], uploads: [], trailers: [], conflicts: [] };
-		const paths = [...outcomes].filter(([, o]) => o === "merge").map(([path]) => path);
+		const cap = this.deps.mergeCapBytes ?? MERGE_CAP_BYTES;
+		const paths = [...outcomes].filter(([, o]) => o === "merge" || o === "conflict").map(([path]) => path);
 		for (const path of paths.sort()) {
 			const ours = local.get(path) as Changed;
 			const theirs = (remote.get(path) as { sha: string }).sha;
-			const base = (index.get(path) as IndexEntry).blobSha;
-			const oursBytes = await vault.read(ours.vaultPath);
-			const result = merge(
-				await readBlob(client, settings.repository, base),
-				oursBytes,
-				await readBlob(client, settings.repository, theirs),
-				path,
-			);
+			const base = index.get(path)?.blobSha ?? null;
+			// Over the cap nothing is read: ours stays on disk untouched until the user answers.
+			const oursBytes = ours.size <= cap ? await vault.read(ours.vaultPath) : null;
+			let result: MergeResult;
+			if (!oursBytes) result = { kind: "conflict", detail: "too-large" };
+			else if (isBinaryPath(path) || decodeText(oursBytes) === null) result = { kind: "conflict", detail: "binary" };
+			// Added on both sides: no base to merge against, so the user decides.
+			else if (base === null) result = { kind: "conflict", detail: "overlap" };
+			else {
+				const baseBytes = await readBlob(client, settings.repository, base, cap);
+				const theirsBytes = baseBytes && (await readBlob(client, settings.repository, theirs, cap));
+				result =
+					baseBytes && theirsBytes ? merge(baseBytes, oursBytes, theirsBytes, path) : { kind: "conflict", detail: "too-large" };
+			}
 			if (result.kind === "conflict") {
-				const snapshotId = await this.snapshot(path, oursBytes, ours.blobSha, base, "conflict-local");
+				const snapshotId = oursBytes && (await this.snapshot(path, oursBytes, ours.blobSha, base, "conflict-local"));
 				merged.conflicts.push({
 					path,
 					kind: result.detail === "binary" ? "binary" : "text-overlap",
@@ -310,11 +321,11 @@ export class Orchestrator {
 
 			// One snapshot per (path, base): a retry after the merged bytes landed must keep
 			// the original, not snapshot the merge, and the trailer names that original.
-			const snapshot = await this.deps.store.findSnapshot(path, base, "pre-merge");
+			const snapshot = await this.deps.store.findSnapshot(path, base as string, "pre-merge");
 			const sha = await gitBlobSha(result.bytes);
 			let stat = { mtime: ours.mtime, size: ours.size };
 			if (sha !== ours.blobSha) {
-				if (!snapshot) await this.snapshot(path, oursBytes, ours.blobSha, base, "pre-merge");
+				if (!snapshot) await this.snapshot(path, oursBytes as Uint8Array, ours.blobSha, base, "pre-merge");
 				await vault.writeChunked(ours.vaultPath, streamOf(result.bytes), stat);
 				stat = await this.statWritten(path, ours.vaultPath);
 			}
@@ -322,7 +333,7 @@ export class Orchestrator {
 				merged.downloaded.push({ path, ...stat, blobSha: sha, mode: FILE_MODE });
 			} else {
 				merged.uploads.push({ path, vaultPath: ours.vaultPath, ...stat });
-				merged.trailers.push({ path, base, ours: snapshot?.blobSha ?? ours.blobSha, theirs });
+				merged.trailers.push({ path, base: base as string, ours: snapshot?.blobSha ?? ours.blobSha, theirs });
 			}
 		}
 		return merged;

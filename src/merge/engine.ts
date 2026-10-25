@@ -6,6 +6,22 @@ export type MergeResult = { kind: "merged"; bytes: Uint8Array } | { kind: "confl
 
 // Past this many inserted plus removed lines per side the diff gives up and the user decides.
 export const MAX_EDIT_LENGTH = 2000;
+// Per side; the caller checks it before reading, since a merge holds all three sides at once.
+export const MERGE_CAP_BYTES = 1024 * 1024;
+
+// Extensions that are binary for certain, so large media is never sniffed. Nothing is ever
+// text by extension.
+const BINARY_EXTENSIONS = new Set([
+	...["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tif", "tiff", "heic", "avif", "psd", "pdf"],
+	...["mp3", "wav", "m4a", "ogg", "flac", "aac", "mp4", "mov", "webm", "mkv", "avi"],
+	...["zip", "gz", "tgz", "7z", "rar", "docx", "xlsx", "pptx", "epub", "woff", "woff2", "ttf", "otf"],
+]);
+
+export function isBinaryPath(path: string): boolean {
+	const name = path.slice(path.lastIndexOf("/") + 1);
+	const dot = name.lastIndexOf(".");
+	return dot > 0 && BINARY_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
 
 interface Hunk {
 	// Base lines [start, end) are replaced by `lines`; start === end is a pure insertion.
@@ -43,7 +59,8 @@ export function splitLines(text: string): string[] {
 
 // Pure three-way merge of one file. Two edits conflict when they touch the same base lines or
 // the same paragraph (a run of non-blank base lines); edits made identically on both sides agree.
-export function merge(base: Uint8Array, ours: Uint8Array, theirs: Uint8Array, _path: string): MergeResult {
+export function merge(base: Uint8Array, ours: Uint8Array, theirs: Uint8Array, path: string): MergeResult {
+	if (isBinaryPath(path)) return { kind: "conflict", detail: "binary" };
 	const texts = [base, ours, theirs].map(decodeText);
 	if (texts.some((t) => t === null)) return { kind: "conflict", detail: "binary" };
 	const [baseLines, oursLines, theirsLines] = (texts as string[]).map(splitLines) as [string[], string[], string[]];
