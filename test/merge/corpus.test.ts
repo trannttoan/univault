@@ -55,8 +55,8 @@ describe("merge corpus", () => {
 });
 
 // A 1 MB note of two-line paragraphs; ours rewrites a block just inside the edit cap, theirs
-// edits one far-away line. Durations are printed for the TRD.
-describe("merge cost at the caps", () => {
+// edits one far-away line. Timings live in the TRD, not here: CI hardware varies too much.
+describe("merging at the caps", () => {
 	const paragraph = (i: number) => `Paragraph ${i}, first line of some ordinary note text.\nSecond line ${i}.\n\n`;
 	const paragraphs: string[] = [];
 	for (let size = 0, i = 0; size < MERGE_CAP_BYTES - 200; i++) {
@@ -70,24 +70,12 @@ describe("merge cost at the caps", () => {
 	const theirs = paragraphs.map((p, i) => (i === paragraphs.length - 5 ? p.replace("first", "FIRST") : p)).join("");
 	const atCap = Math.floor(MAX_EDIT_LENGTH / 4);
 
-	it("merges a 1 MB note at the edit cap within 300 ms", () => {
+	it("merges a 1 MB note at the edit cap", () => {
 		expect(base.length).toBeLessThanOrEqual(MERGE_CAP_BYTES);
-		merge(enc("a"), enc("b\n\na"), enc("a\n\nc"), "warm-up.md");
-		const ours = rewrite(atCap);
-		const started = performance.now();
-		const result = merge(enc(base), enc(ours), enc(theirs), "big.md");
-		const elapsed = performance.now() - started;
-		console.log(`merge 1 MB, ${atCap * 4} edited lines on one side: ${elapsed.toFixed(0)} ms`);
-		expect(result.kind).toBe("merged");
-		expect(elapsed).toBeLessThan(300);
+		expect(merge(enc(base), enc(rewrite(atCap)), enc(theirs), "big.md").kind).toBe("merged");
 	});
 
-	it("gives up quickly just past the edit cap", () => {
-		const ours = rewrite(atCap + 1);
-		const started = performance.now();
-		const result = merge(enc(base), enc(ours), enc(theirs), "big.md");
-		const elapsed = performance.now() - started;
-		console.log(`merge 1 MB, past the edit cap: ${elapsed.toFixed(0)} ms`);
-		expect(result).toEqual({ kind: "conflict", detail: "too-large" });
+	it("gives up just past the edit cap", () => {
+		expect(merge(enc(base), enc(rewrite(atCap + 1)), enc(theirs), "big.md")).toEqual({ kind: "conflict", detail: "too-large" });
 	});
 });
