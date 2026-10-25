@@ -324,6 +324,20 @@ export class Orchestrator {
 		const { store, vault } = this.deps;
 		const applied: Applied = { index: [], added: new Map(), resolved: [] };
 		for (const record of records) {
+			const theirs = { path: record.path, mtime: 0, size: 0, blobSha: record.remoteSha, mode: FILE_MODE };
+			if (record.choice === "mine") {
+				applied.index.push(theirs);
+				applied.resolved.push(record.path);
+				continue;
+			}
+			if (record.choice === "theirs") {
+				const entry = await this.keepTheirs(context, record);
+				if (entry) {
+					applied.index.push(entry);
+					applied.resolved.push(record.path);
+				}
+				continue;
+			}
 			if (record.choice !== "both") continue;
 			let sibling = record.siblingPath;
 			if (!sibling) {
@@ -339,10 +353,30 @@ export class Orchestrator {
 			else await download(client, settings.repository, vault, sibling, record.remoteSha, null);
 			const stat = await this.statWritten(sibling, sibling);
 			applied.added.set(sibling, { kind: "added", vaultPath: sibling, blobSha, ...stat });
-			applied.index.push({ path: record.path, mtime: 0, size: 0, blobSha: record.remoteSha, mode: FILE_MODE });
+			applied.index.push(theirs);
 			applied.resolved.push(record.path);
 		}
 		return applied;
+	}
+
+	// Replaces ours with theirs only if ours is still what the user saw in the picker. If it was
+	// edited since, the choice is dropped and the conflict asks again about the new version.
+	private async keepTheirs(context: Context, record: PendingConflict): Promise<IndexEntry | null> {
+		const { store, vault } = this.deps;
+		const { path, remoteSha } = record;
+		const current = await vault.stat(path);
+		const unchanged = current?.mtime === record.localStat.mtime && current.size === record.localStat.size;
+		if (current && !unchanged) {
+			const bytes = await vault.read(path);
+			const sha = await gitBlobSha(bytes);
+			// Theirs already landed: a retry after the push failed.
+			if (sha === remoteSha) return { path, ...current, blobSha: sha, mode: FILE_MODE };
+			const localSnapshotId = await this.snapshot(path, bytes, sha, record.baseSha, "conflict-local");
+			await store.putConflict({ ...record, choice: null, localSha: sha, localStat: current, localSnapshotId });
+			return null;
+		}
+		await download(context.client, context.settings.repository, vault, path, remoteSha, current);
+		return { path, ...(await this.statWritten(path, path)), blobSha: remoteSha, mode: FILE_MODE };
 	}
 
 	private async snapshot(

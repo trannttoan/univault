@@ -2,7 +2,11 @@ import { type App, Modal } from "obsidian";
 import type { PendingConflict } from "../store/db";
 import type { Choice } from "../sync/orchestrator";
 
-const CHOICES: [Choice, string][] = [["both", "Keep both"]];
+const CHOICES: [Choice, string][] = [
+	["mine", "Keep mine"],
+	["theirs", "Keep theirs"],
+	["both", "Keep both"],
+];
 
 // Only records the answer; the orchestrator applies it at the next sync. Closing without
 // an answer (Escape, the close button) keeps both.

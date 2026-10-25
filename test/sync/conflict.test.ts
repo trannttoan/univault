@@ -1,6 +1,7 @@
 import type { App } from "obsidian";
 import { beforeEach, describe, expect, it } from "vitest";
 import { pickConflict } from "../../src/ui/conflict-picker";
+import { gitBlobSha } from "../../src/vault/hash";
 import { App as FakeApp, Modal } from "../fakes/obsidian";
 import { createHarness, type Harness, REPO } from "./harness";
 
@@ -93,5 +94,68 @@ describe("same paragraph edited on two devices", () => {
 		await b.orchestrator.sync("manual");
 		expect(text(b.vault.bytes(SIBLING))).toBe("an older copy");
 		expect(text(b.vault.bytes("Daily note (conflict from A 2026-10-25 14.03 2).md"))).toBe(THEIRS);
+	});
+
+	it("keep mine: both devices end with B's version, from one commit by B", async () => {
+		await b.orchestrator.sync("manual");
+		await b.orchestrator.resolve(NOTE, "mine");
+		b.github.requests.length = 0;
+
+		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 1, downloaded: 0 });
+		expect(b.github.requests.filter((r) => r.method === "POST" && r.path.endsWith("/git/commits"))).toHaveLength(1);
+		await a.orchestrator.sync("manual");
+		for (const device of [a, b]) expect(text(device.vault.bytes(NOTE))).toBe(OURS);
+		expect(await b.orchestrator.conflicts()).toEqual([]);
+		expect([...b.vault.files.keys()].some((p) => p.includes("conflict from"))).toBe(false);
+	});
+
+	it("keep theirs: both devices end with A's version and B commits nothing for it", async () => {
+		await b.orchestrator.sync("manual");
+		await b.orchestrator.resolve(NOTE, "theirs");
+		b.github.requests.length = 0;
+
+		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
+		expect(b.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
+		await a.orchestrator.sync("manual");
+		for (const device of [a, b]) expect(text(device.vault.bytes(NOTE))).toBe(THEIRS);
+		expect(await b.orchestrator.conflicts()).toEqual([]);
+
+		b.github.requests.length = 0;
+		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
+		expect(b.github.requests.map((r) => r.status)).toEqual([304]);
+	});
+
+	it("keep theirs after the note was edited again asks again instead of overwriting the edit", async () => {
+		await b.orchestrator.sync("manual");
+		await b.orchestrator.resolve(NOTE, "theirs");
+		const edited = `${OURS}\nOne more thought.\n`;
+		b.vault.setFile(NOTE, edited);
+
+		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: [NOTE] });
+		expect(text(b.vault.bytes(NOTE))).toBe(edited);
+		const [record] = await b.orchestrator.conflicts();
+		expect(record).toMatchObject({ choice: null, localSha: await gitBlobSha(new TextEncoder().encode(edited)) });
+		expect(text((await b.store.getSnapshot(record!.localSnapshotId!))?.bytes)).toBe(edited);
+
+		const app = new FakeApp();
+		void pickConflict(app as unknown as App, record!);
+		expect(Modal.open[0]?.button("Keep theirs")).toBeDefined();
+		Modal.open[0]?.button("Keep theirs")?.click();
+		await b.orchestrator.resolve(NOTE, "theirs");
+		await b.orchestrator.sync("manual");
+		expect(text(b.vault.bytes(NOTE))).toBe(THEIRS);
+		expect(await b.orchestrator.conflicts()).toEqual([]);
+	});
+
+	it("offers keep mine, keep theirs and keep both, and records the one clicked", async () => {
+		await b.orchestrator.sync("manual");
+		const [record] = await b.orchestrator.conflicts();
+		const app = new FakeApp() as unknown as App;
+		for (const [label, expected] of [["Keep mine", "mine"], ["Keep theirs", "theirs"], ["Keep both", "both"]] as const) {
+			const choice = pickConflict(app, record!);
+			Modal.open[0]?.button(label)?.click();
+			expect(await choice).toBe(expected);
+			expect(Modal.open).toHaveLength(0);
+		}
 	});
 });
