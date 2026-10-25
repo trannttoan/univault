@@ -400,9 +400,12 @@ export class Orchestrator {
 			const sha = await gitBlobSha(bytes);
 			// Theirs already landed: a retry after the push failed.
 			if (sha === remoteSha) return { path, ...current, blobSha: sha, mode: FILE_MODE };
-			const localSnapshotId = await this.snapshot(path, bytes, sha, record.baseSha, "conflict-local");
-			await store.putConflict({ ...record, choice: null, localSha: sha, localStat: current, localSnapshotId });
-			return null;
+			// Same bytes with a new mtime is not an edit.
+			if (sha !== record.localSha) {
+				const localSnapshotId = await this.snapshot(path, bytes, sha, record.baseSha, "conflict-local");
+				await store.putConflict({ ...record, choice: null, localSha: sha, localStat: current, localSnapshotId });
+				return null;
+			}
 		}
 		await download(context.client, context.settings.repository, vault, path, remoteSha, current);
 		return { path, ...(await this.statWritten(path, path)), blobSha: remoteSha, mode: FILE_MODE };

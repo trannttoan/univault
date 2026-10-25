@@ -147,6 +147,16 @@ describe("same paragraph edited on two devices", () => {
 		expect(await b.orchestrator.conflicts()).toEqual([]);
 	});
 
+	it("keep theirs still applies when the note was only touched, not edited", async () => {
+		await b.orchestrator.sync("manual");
+		await b.orchestrator.resolve(NOTE, "theirs");
+		b.vault.setFile(NOTE, OURS);
+
+		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
+		expect(text(b.vault.bytes(NOTE))).toBe(THEIRS);
+		expect(await b.orchestrator.conflicts()).toEqual([]);
+	});
+
 	it("offers keep mine, keep theirs and keep both, and records the one clicked", async () => {
 		await b.orchestrator.sync("manual");
 		const [record] = await b.orchestrator.conflicts();
