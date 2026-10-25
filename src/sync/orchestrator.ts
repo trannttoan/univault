@@ -1,7 +1,7 @@
 import { UnivaultError } from "../errors";
 import type { GitHubClient } from "../github/client";
 import type { UnivaultSettings } from "../settings";
-import type { IndexEntry, StateStore, SyncAnchor } from "../store/db";
+import type { IndexEntry, Snapshot, StateStore, SyncAnchor } from "../store/db";
 import { merge } from "../merge/engine";
 import { download, readBlob, streamOf } from "../transfer/download";
 import { bootstrapBranch, uploadBlob } from "../transfer/upload";
@@ -30,6 +30,7 @@ export interface OrchestratorDeps {
 	uploadCapBytes: number;
 	configDir: string;
 	pluginDir: string;
+	now?: () => Date;
 }
 
 interface Context {
@@ -57,6 +58,7 @@ interface Merged {
 const REPOSITORY = /^[\w.-]+\/[\w.-]+$/;
 const MAX_REF_RETRIES = 3;
 const FILE_MODE = "100644";
+const SNAPSHOT_DAYS = 30;
 
 export class Orchestrator {
 	state: SyncState = "idle";
@@ -102,6 +104,7 @@ export class Orchestrator {
 			const settings = this.deps.settings();
 			if (!session || !REPOSITORY.test(settings.repository) || !settings.branch) return { kind: "needs-setup" };
 			await this.deps.vault.removeTempFiles();
+			await this.pruneSnapshots();
 
 			// A rejected ref update means another device pushed first: start over from the head check.
 			for (let attempt = 0; ; attempt++) {
@@ -218,17 +221,22 @@ export class Orchestrator {
 			const ours = local.get(path) as Changed;
 			const theirs = (remote.get(path) as { sha: string }).sha;
 			const base = (index.get(path) as IndexEntry).blobSha;
+			const oursBytes = await vault.read(ours.vaultPath);
 			const result = merge(
 				await readBlob(client, settings.repository, base),
-				await vault.read(ours.vaultPath),
+				oursBytes,
 				await readBlob(client, settings.repository, theirs),
 				path,
 			);
 			if (result.kind === "conflict") throw new UnivaultError("conflict-retry", { paths: [path] });
 
+			// One snapshot per (path, base): a retry after the merged bytes landed must keep
+			// the original, not snapshot the merge, and the trailer names that original.
+			const snapshot = await this.deps.store.findSnapshot(path, base, "pre-merge");
 			const sha = await gitBlobSha(result.bytes);
 			let stat = { mtime: ours.mtime, size: ours.size };
 			if (sha !== ours.blobSha) {
+				if (!snapshot) await this.snapshot(path, oursBytes, ours.blobSha, base, "pre-merge");
 				await vault.writeChunked(ours.vaultPath, streamOf(result.bytes), stat);
 				stat = await this.statWritten(path, ours.vaultPath);
 			}
@@ -236,10 +244,35 @@ export class Orchestrator {
 				merged.downloaded.push({ path, ...stat, blobSha: sha, mode: FILE_MODE });
 			} else {
 				merged.uploads.push({ path, vaultPath: ours.vaultPath, ...stat });
-				merged.trailers.push({ path, base, ours: ours.blobSha, theirs });
+				merged.trailers.push({ path, base, ours: snapshot?.blobSha ?? ours.blobSha, theirs });
 			}
 		}
 		return merged;
+	}
+
+	private async snapshot(
+		path: string,
+		bytes: Uint8Array,
+		blobSha: string,
+		baseSha: string | null,
+		reason: Snapshot["reason"],
+	): Promise<string> {
+		const id = crypto.randomUUID();
+		const createdAt = this.now().toISOString();
+		await this.deps.store.putSnapshot({ id, path, bytes, blobSha, baseSha, createdAt, reason });
+		return id;
+	}
+
+	// Snapshots a pending conflict still points at are kept past the retention period.
+	private async pruneSnapshots(): Promise<void> {
+		const { store } = this.deps;
+		const keep = new Set((await store.getConflicts()).map((c) => c.localSnapshotId).filter((id) => id !== null));
+		const before = new Date(this.now().getTime() - SNAPSHOT_DAYS * 24 * 60 * 60 * 1000);
+		await store.pruneSnapshots(before.toISOString(), keep);
+	}
+
+	private now(): Date {
+		return this.deps.now?.() ?? new Date();
 	}
 
 	private async statWritten(path: string, vaultPath: string): Promise<{ mtime: number; size: number }> {

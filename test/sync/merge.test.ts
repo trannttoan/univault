@@ -104,3 +104,50 @@ describe("two devices editing different paragraphs", () => {
 		expect(text(b.vault.bytes(NOTE))).toBe("Morning, from A.\n\nAfternoon.\n\nEvening, from B, still typing.\n");
 	});
 });
+
+describe("pre-merge snapshots", () => {
+	let a: Harness;
+	let b: Harness;
+	const ours = "Morning.\n\nAfternoon.\n\nEvening, from B.\n";
+
+	beforeEach(async () => {
+		a = await createHarness();
+		await a.inSync({ [NOTE]: BASE });
+		b = await a.fork("B");
+		a.vault.setFile(NOTE, "Morning, from A.\n\nAfternoon.\n\nEvening.\n");
+		await a.orchestrator.sync("manual");
+		b.vault.setFile(NOTE, ours);
+	});
+
+	it("stores ours' original bytes before writing the merge", async () => {
+		await b.orchestrator.sync("manual");
+		const snapshots = await b.store.getSnapshots();
+		expect(snapshots).toHaveLength(1);
+		const blobSha = await gitBlobSha(new TextEncoder().encode(ours));
+		expect(snapshots[0]).toMatchObject({ path: NOTE, reason: "pre-merge", blobSha });
+		expect(text(snapshots[0]?.bytes)).toBe(ours);
+	});
+
+	it("keeps exactly one snapshot of the original when the push fails after the merged write", async () => {
+		b.github.inject("PATCH", /git\/refs/, "network");
+		const failed = await b.orchestrator.sync("manual");
+		expect(failed.kind === "failed" && failed.error.code).toBe("offline");
+		expect(text(b.vault.bytes(NOTE))).toBe("Morning, from A.\n\nAfternoon.\n\nEvening, from B.\n");
+
+		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", merged: [NOTE] });
+		const snapshots = await b.store.getSnapshots();
+		expect(snapshots).toHaveLength(1);
+		expect(text(snapshots[0]?.bytes)).toBe(ours);
+		const trailer = b.github.commit(REPO, b.github.head(REPO, "main")!)!.message.split("\n").at(-1)!;
+		expect(trailer.split(" ").at(-2)).toBe(snapshots[0]?.blobSha);
+	});
+
+	it("drops snapshots older than 30 days at the next sync", async () => {
+		const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+		const blobSha = "a".repeat(40);
+		await b.store.putSnapshot({ id: "old", path: "x.md", bytes: new Uint8Array(1), blobSha, baseSha: null, createdAt: old, reason: "pre-merge" });
+		await b.orchestrator.sync("manual");
+		expect((await b.store.getSnapshots()).map((s) => s.id)).not.toContain("old");
+		expect(await b.store.getSnapshots()).toHaveLength(1);
+	});
+});
