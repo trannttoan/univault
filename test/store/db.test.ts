@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { UnivaultError } from "../../src/errors";
-import { type IndexEntry, StateStore, type SyncAnchor } from "../../src/store/db";
+import { type IndexEntry, SCHEMA_VERSION, type Snapshot, StateStore, type SyncAnchor } from "../../src/store/db";
 
 const anchor: SyncAnchor = {
 	repository: "owner/vault",
@@ -54,7 +54,7 @@ describe("StateStore", () => {
 	it("refuses a database with a newer schema", async () => {
 		const vaultId = crypto.randomUUID();
 		await new Promise<void>((resolve) => {
-			const req = indexedDB.open(`univault-${vaultId}`, 2);
+			const req = indexedDB.open(`univault-${vaultId}`, SCHEMA_VERSION + 1);
 			req.onsuccess = () => {
 				req.result.close();
 				resolve();
@@ -66,4 +66,77 @@ describe("StateStore", () => {
 		expect((error as UnivaultError).code).toBe("unknown");
 		expect(String((error as UnivaultError).cause)).toContain(`univault-${vaultId}`);
 	});
+
+	it("upgrades a version 1 database to version 2, keeping anchor and index", async () => {
+		const vaultId = crypto.randomUUID();
+		// The version 1 layout, as release 0.1.x created it.
+		await new Promise<void>((resolve) => {
+			const req = indexedDB.open(`univault-${vaultId}`, 1);
+			req.onupgradeneeded = () => {
+				req.result.createObjectStore("anchor");
+				req.result.createObjectStore("index", { keyPath: "path" });
+			};
+			req.onsuccess = () => {
+				const tx = req.result.transaction(["anchor", "index"], "readwrite");
+				tx.objectStore("anchor").put(anchor, "current");
+				tx.objectStore("index").put(entry);
+				tx.oncomplete = () => {
+					req.result.close();
+					resolve();
+				};
+			};
+		});
+
+		const upgraded = await StateStore.open(vaultId);
+		expect(await upgraded.getAnchor()).toEqual(anchor);
+		expect(await upgraded.getIndex()).toEqual(new Map([["note.md", entry]]));
+		expect(await upgraded.getConflicts()).toEqual([]);
+		expect(await upgraded.getSnapshots()).toEqual([]);
+		upgraded.close();
+
+		const freshId = crypto.randomUUID();
+		(await StateStore.open(freshId)).close();
+		const shape = await layout(`univault-${vaultId}`);
+		expect(shape).toMatchObject({ version: SCHEMA_VERSION, stores: { length: 4 } });
+		expect(shape).toEqual(await layout(`univault-${freshId}`));
+	});
+
+	it("finds a snapshot by path and base, and prunes old ones except those kept", async () => {
+		const store = await StateStore.open(crypto.randomUUID());
+		const snapshot = (id: string, createdAt: string): Snapshot => ({
+			id,
+			path: "note.md",
+			bytes: new Uint8Array([1, 2]),
+			blobSha: "e".repeat(40),
+			baseSha: "b".repeat(40),
+			createdAt,
+			reason: "pre-merge",
+		});
+		await store.putSnapshot(snapshot("old", "2026-01-01T00:00:00.000Z"));
+		await store.putSnapshot(snapshot("kept", "2026-01-02T00:00:00.000Z"));
+		await store.putSnapshot(snapshot("new", "2026-03-01T00:00:00.000Z"));
+
+		expect((await store.findSnapshot("note.md", "b".repeat(40), "pre-merge"))?.bytes).toEqual(new Uint8Array([1, 2]));
+		expect(await store.findSnapshot("note.md", "b".repeat(40), "conflict-local")).toBeNull();
+		await store.pruneSnapshots("2026-02-01T00:00:00.000Z", new Set(["kept"]));
+		expect((await store.getSnapshots()).map((s) => s.id).sort()).toEqual(["kept", "new"]);
+		store.close();
+	});
 });
+
+// Store names with their key paths and indexes, for comparing two databases' shapes.
+function layout(name: string): Promise<unknown> {
+	return new Promise((resolve) => {
+		const req = indexedDB.open(name);
+		req.onsuccess = () => {
+			const db = req.result;
+			const stores = Array.from(db.objectStoreNames).map((store) => {
+				const os = db.transaction(store, "readonly").objectStore(store);
+				const indexes = Array.from(os.indexNames).map((i) => [i, os.index(i).keyPath]);
+				return [store, os.keyPath, indexes];
+			});
+			resolve({ version: db.version, stores });
+			db.close();
+		};
+	});
+}

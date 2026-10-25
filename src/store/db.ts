@@ -1,6 +1,6 @@
 import { UnivaultError } from "../errors";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface SyncAnchor {
 	repository: string;
@@ -18,9 +18,37 @@ export interface IndexEntry {
 	mode: string;
 }
 
+export interface Snapshot {
+	id: string;
+	path: string;
+	bytes: Uint8Array;
+	blobSha: string;
+	// The index blob the snapshot was taken against; null when the path had none.
+	baseSha: string | null;
+	createdAt: string;
+	reason: "pre-merge" | "conflict-local";
+}
+
+export interface PendingConflict {
+	path: string;
+	kind: "text-overlap" | "binary" | "delete-vs-modify";
+	baseSha: string | null;
+	remoteSha: string;
+	remoteDevice: string;
+	remoteTime: string;
+	localSha: string;
+	localStat: { mtime: number; size: number };
+	localSnapshotId: string | null;
+	choice: "mine" | "theirs" | "both" | null;
+}
+
 const ANCHOR = "anchor";
 const INDEX = "index";
+const SNAPSHOTS = "snapshots";
+const CONFLICTS = "conflicts";
 const ANCHOR_KEY = "current";
+const BY_PATH_BASE = "by-path-base";
+const BY_CREATED = "by-created";
 
 export class StateStore {
 	private constructor(private readonly db: IDBDatabase) {}
@@ -29,10 +57,19 @@ export class StateStore {
 		const name = `univault-${vaultId}`;
 		return new Promise((resolve, reject) => {
 			const req = indexedDB.open(name, SCHEMA_VERSION);
-			req.onupgradeneeded = () => {
+			// Forward-only: each step brings an older layout up by one version.
+			req.onupgradeneeded = (event) => {
 				const db = req.result;
-				db.createObjectStore(ANCHOR);
-				db.createObjectStore(INDEX, { keyPath: "path" });
+				if (event.oldVersion < 1) {
+					db.createObjectStore(ANCHOR);
+					db.createObjectStore(INDEX, { keyPath: "path" });
+				}
+				if (event.oldVersion < 2) {
+					const snapshots = db.createObjectStore(SNAPSHOTS, { keyPath: "id" });
+					snapshots.createIndex(BY_PATH_BASE, ["path", "baseSha"]);
+					snapshots.createIndex(BY_CREATED, "createdAt");
+					db.createObjectStore(CONFLICTS, { keyPath: "path" });
+				}
 			};
 			req.onsuccess = () => resolve(new StateStore(req.result));
 			req.onerror = () => {
@@ -64,20 +101,73 @@ export class StateStore {
 		return new Map(entries.map((entry) => [entry.path, entry]));
 	}
 
-	// Anchor and index entries commit together or not at all.
-	advance(anchor: SyncAnchor, entries: IndexEntry[]): Promise<void> {
-		const tx = this.db.transaction([ANCHOR, INDEX], "readwrite");
+	// Anchor, index entries and conflict records commit together or not at all.
+	advance(
+		anchor: SyncAnchor,
+		entries: IndexEntry[],
+		conflicts: { put?: PendingConflict[]; remove?: string[] } = {},
+	): Promise<void> {
+		const tx = this.db.transaction([ANCHOR, INDEX, CONFLICTS], "readwrite");
 		const finished = done(tx);
 		try {
 			tx.objectStore(ANCHOR).put(anchor, ANCHOR_KEY);
 			const index = tx.objectStore(INDEX);
 			for (const entry of entries) index.put(entry);
+			const records = tx.objectStore(CONFLICTS);
+			for (const path of conflicts.remove ?? []) records.delete(path);
+			for (const record of conflicts.put ?? []) records.put(record);
 		} catch (error) {
 			tx.abort();
 			finished.catch(() => {});
 			return Promise.reject(storageError(error));
 		}
 		return finished;
+	}
+
+	async getConflicts(): Promise<PendingConflict[]> {
+		const tx = this.db.transaction(CONFLICTS, "readonly");
+		return request<PendingConflict[]>(tx.objectStore(CONFLICTS).getAll());
+	}
+
+	putConflict(conflict: PendingConflict): Promise<void> {
+		const tx = this.db.transaction(CONFLICTS, "readwrite");
+		tx.objectStore(CONFLICTS).put(conflict);
+		return done(tx);
+	}
+
+	putSnapshot(snapshot: Snapshot): Promise<void> {
+		const tx = this.db.transaction(SNAPSHOTS, "readwrite");
+		tx.objectStore(SNAPSHOTS).put(snapshot);
+		return done(tx);
+	}
+
+	async getSnapshot(id: string): Promise<Snapshot | null> {
+		const tx = this.db.transaction(SNAPSHOTS, "readonly");
+		return (await request<Snapshot | undefined>(tx.objectStore(SNAPSHOTS).get(id))) ?? null;
+	}
+
+	async findSnapshot(path: string, baseSha: string, reason: Snapshot["reason"]): Promise<Snapshot | null> {
+		const tx = this.db.transaction(SNAPSHOTS, "readonly");
+		const found = await request<Snapshot[]>(tx.objectStore(SNAPSHOTS).index(BY_PATH_BASE).getAll([path, baseSha]));
+		return found.find((snapshot) => snapshot.reason === reason) ?? null;
+	}
+
+	async getSnapshots(): Promise<Snapshot[]> {
+		const tx = this.db.transaction(SNAPSHOTS, "readonly");
+		return request<Snapshot[]>(tx.objectStore(SNAPSHOTS).getAll());
+	}
+
+	// Deletes snapshots created before `before` (ISO time), except the ids in `keep`.
+	pruneSnapshots(before: string, keep: Set<string>): Promise<void> {
+		const tx = this.db.transaction(SNAPSHOTS, "readwrite");
+		const cursor = tx.objectStore(SNAPSHOTS).index(BY_CREATED).openCursor(IDBKeyRange.upperBound(before, true));
+		cursor.onsuccess = () => {
+			const current = cursor.result;
+			if (!current) return;
+			if (!keep.has((current.value as Snapshot).id)) current.delete();
+			current.continue();
+		};
+		return done(tx);
 	}
 
 	discardAnchor(): Promise<void> {
