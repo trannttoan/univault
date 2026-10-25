@@ -1,6 +1,6 @@
 import { type App, Modal } from "obsidian";
 import type { PendingConflict } from "../store/db";
-import type { Choice } from "../sync/orchestrator";
+import type { Choice, Orchestrator } from "../sync/orchestrator";
 
 const CHOICES: [Choice, string][] = [
 	["mine", "Keep mine"],
@@ -42,4 +42,15 @@ export class ConflictPicker extends Modal {
 
 export function pickConflict(app: App, conflict: PendingConflict): Promise<Choice> {
 	return new Promise((resolve) => new ConflictPicker(app, conflict, resolve).open());
+}
+
+// One picker at a time, in path order. Each answer is stored before the next picker opens;
+// `answered` then starts the sync that applies it.
+export async function pickInTurn(app: App, orchestrator: Orchestrator, answered: () => void): Promise<void> {
+	for (;;) {
+		const next = (await orchestrator.conflicts()).find((c) => c.choice === null);
+		if (!next) return;
+		await orchestrator.resolve(next.path, await pickConflict(app, next));
+		answered();
+	}
 }

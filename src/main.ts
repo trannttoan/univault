@@ -3,7 +3,7 @@ import { SessionStore } from "./session";
 import { UnivaultSettingTab, type UnivaultSettings, defaultSettings, readSettings } from "./settings";
 import { StateStore } from "./store/db";
 import { Orchestrator, type SyncOutcome } from "./sync/orchestrator";
-import { pickConflict } from "./ui/conflict-picker";
+import { pickInTurn } from "./ui/conflict-picker";
 import { outcomeMessage } from "./ui/messages";
 import { statusText } from "./ui/status-bar";
 import { ObsidianVaultAdapter } from "./vault/obsidian-adapter";
@@ -35,7 +35,8 @@ export default class UnivaultPlugin extends Plugin {
 
 		const statusBar = this.addStatusBarItem();
 		statusBar.addClass("mod-clickable");
-		const render = () => statusBar.setText(statusText(this.orchestrator.state, this.orchestrator.lastSyncAt));
+		const { orchestrator } = this;
+		const render = () => statusBar.setText(statusText(orchestrator.state, orchestrator.lastSyncAt, orchestrator.pendingConflicts));
 		this.orchestrator.onChange(render);
 		render();
 		this.registerDomEvent(statusBar, "click", () => void this.syncNow());
@@ -47,7 +48,14 @@ export default class UnivaultPlugin extends Plugin {
 			name: "Sync now",
 			callback: () => void this.syncNow(),
 		});
+		this.addCommand({
+			id: "resolve-conflicts",
+			name: "Resolve conflicts",
+			callback: () => void this.resolveConflicts(),
+		});
 		this.addSettingTab(new UnivaultSettingTab(this.app, this));
+		// Conflicts left unanswered by a force-quit are asked again, without waiting for a sync.
+		this.app.workspace.onLayoutReady(() => void this.resolveConflicts());
 	}
 
 	onunload(): void {
@@ -74,17 +82,11 @@ export default class UnivaultPlugin extends Plugin {
 		return outcome;
 	}
 
-	// One picker at a time, in path order. Each answer is stored and applied by a sync.
 	async resolveConflicts(): Promise<void> {
 		if (this.picking) return;
 		this.picking = true;
 		try {
-			for (;;) {
-				const next = (await this.orchestrator.conflicts()).find((c) => c.choice === null);
-				if (!next) return;
-				await this.orchestrator.resolve(next.path, await pickConflict(this.app, next));
-				void this.syncNow();
-			}
+			await pickInTurn(this.app, this.orchestrator, () => void this.syncNow());
 		} finally {
 			this.picking = false;
 		}

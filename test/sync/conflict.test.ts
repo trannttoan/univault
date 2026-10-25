@@ -1,6 +1,6 @@
 import type { App } from "obsidian";
-import { beforeEach, describe, expect, it } from "vitest";
-import { pickConflict } from "../../src/ui/conflict-picker";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { pickConflict, pickInTurn } from "../../src/ui/conflict-picker";
 import { gitBlobSha } from "../../src/vault/hash";
 import { App as FakeApp, Modal } from "../fakes/obsidian";
 import { createHarness, type Harness, REPO } from "./harness";
@@ -157,5 +157,55 @@ describe("same paragraph edited on two devices", () => {
 			expect(await choice).toBe(expected);
 			expect(Modal.open).toHaveLength(0);
 		}
+	});
+
+	it("refreshes the record when A edits the note again while it is pending, dropping an old answer", async () => {
+		await b.orchestrator.sync("manual");
+		await b.orchestrator.resolve(NOTE, "theirs");
+		const again = "Morning, first line from A, edited again.\nMorning, second line.\n\nEvening.\n";
+		a.vault.setFile(NOTE, again);
+		await a.orchestrator.sync("manual");
+
+		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: [NOTE] });
+		const records = await b.orchestrator.conflicts();
+		expect(records).toHaveLength(1);
+		expect(records[0]).toMatchObject({ remoteSha: await gitBlobSha(new TextEncoder().encode(again)), choice: null });
+		expect(text(b.vault.bytes(NOTE))).toBe(OURS);
+	});
+
+	it("does not upload a local edit to a pending note", async () => {
+		await b.orchestrator.sync("manual");
+		b.vault.setFile(NOTE, `${OURS}more\n`);
+		b.github.requests.length = 0;
+
+		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0, conflicts: [NOTE] });
+		expect(b.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
+		expect(text(b.github.file(REPO, "main", NOTE))).toBe(THEIRS);
+		expect(b.orchestrator.state).toBe("conflicts-pending");
+		expect(b.orchestrator.pendingConflicts).toBe(1);
+	});
+
+	it("opens one picker per conflict, in path order, each after the previous is answered", async () => {
+		a.vault.setFile("other.md", "o from A");
+		await a.orchestrator.sync("manual");
+		expect(await b.orchestrator.sync("manual")).toMatchObject({ conflicts: [NOTE, "other.md"] });
+
+		let answered = 0;
+		const app = new FakeApp() as unknown as App;
+		const done = pickInTurn(app, b.orchestrator, () => answered++);
+		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));
+		expect(Modal.open[0]?.text()).toContain(NOTE);
+		Modal.open[0]?.button("Keep mine")?.click();
+
+		await vi.waitFor(() => expect(Modal.open[0]?.text()).toContain("other.md"));
+		expect(Modal.open).toHaveLength(1);
+		Modal.open[0]?.close();
+		await done;
+
+		expect(answered).toBe(2);
+		expect((await b.orchestrator.conflicts()).map((c) => [c.path, c.choice])).toEqual([
+			[NOTE, "mine"],
+			["other.md", "both"],
+		]);
 	});
 });

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import manifest from "../manifest.json";
 import UnivaultPlugin from "../src/main";
 import { readSettings } from "../src/settings";
+import { StateStore } from "../src/store/db";
 import { FakeGitHub } from "./fakes/github";
 import { App as FakeApp, type Plugin as FakePlugin, Modal, Notice } from "./fakes/obsidian";
 
@@ -30,10 +31,10 @@ describe("UnivaultPlugin", () => {
 		vi.unstubAllGlobals();
 	});
 
-	it("shows idle in the status bar and registers the sync command and settings", () => {
+	it("shows idle in the status bar and registers the commands and settings", () => {
 		expect(fake.statusBarItems.map((el) => el.text)).toEqual(["Univault: idle"]);
 		expect(fake.statusBarItems[0]?.listeners.has("click")).toBe(true);
-		expect(fake.commands.map((command) => command.id)).toEqual(["sync-now"]);
+		expect(fake.commands.map((command) => command.id)).toEqual(["sync-now", "resolve-conflicts"]);
 		expect(fake.settingTabs).toHaveLength(1);
 	});
 
@@ -151,6 +152,70 @@ describe("UnivaultPlugin", () => {
 		await vi.waitFor(async () => expect(await plugin.orchestrator.conflicts()).toEqual([]));
 		expect(new TextDecoder().decode(github.file("octo/vault", "main", "n.md"))).toBe("line from here\n");
 		expect(Modal.open).toHaveLength(0);
+	});
+
+	it("asks again after a restart about a conflict left unanswered, without syncing", async () => {
+		const vaultId = plugin.session.vaultId();
+		plugin.onunload();
+		const ours = new TextEncoder().encode("ours, kept on disk\n");
+		app.vault.setFile("n.md", ours);
+		const store = await StateStore.open(vaultId);
+		await store.putSnapshot({
+			id: "snap",
+			path: "n.md",
+			bytes: ours,
+			blobSha: "1".repeat(40),
+			baseSha: "2".repeat(40),
+			createdAt: new Date().toISOString(),
+			reason: "conflict-local",
+		});
+		await store.putConflict({
+			path: "n.md",
+			kind: "text-overlap",
+			baseSha: "2".repeat(40),
+			remoteSha: "3".repeat(40),
+			remoteDevice: "Phone",
+			remoteTime: "2026-10-25T07:41:00Z",
+			localSha: "1".repeat(40),
+			localStat: { mtime: 1, size: ours.byteLength },
+			localSnapshotId: "snap",
+			choice: null,
+			siblingPath: null,
+		});
+		store.close();
+		github.requests.length = 0;
+
+		plugin = new UnivaultPlugin(app as unknown as App, manifest as PluginManifest);
+		fake = plugin as unknown as FakePlugin;
+		await plugin.onload();
+
+		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));
+		expect(Modal.open[0]?.text()).toContain("Phone");
+		expect(fake.statusBarItems[0]?.text).toBe("Univault: 1 conflict");
+		expect(github.requests).toHaveLength(0);
+		expect((await plugin.store.getSnapshot("snap"))?.bytes).toEqual(ours);
+	});
+
+	it("opens pickers from the resolve conflicts command, and none while one is open", async () => {
+		const command = fake.commands.find((c) => c.id === "resolve-conflicts");
+		await plugin.store.putConflict({
+			path: "a.md",
+			kind: "binary",
+			baseSha: null,
+			remoteSha: "3".repeat(40),
+			remoteDevice: "Phone",
+			remoteTime: "",
+			localSha: "1".repeat(40),
+			localStat: { mtime: 1, size: 1 },
+			localSnapshotId: null,
+			choice: null,
+			siblingPath: null,
+		});
+		command?.callback?.();
+		command?.callback?.();
+		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(Modal.open).toHaveLength(1);
 	});
 
 	it("discards the anchor at the next sync after the repository changes", async () => {

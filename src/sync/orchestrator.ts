@@ -15,7 +15,7 @@ import { type MergeTrailer, commitMessage, createSyncCommit } from "./commit";
 import { type LocalChange, type LocalScan, localDelta } from "./local-delta";
 import { type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
 
-export type SyncState = "idle" | "syncing" | "error";
+export type SyncState = "idle" | "syncing" | "conflicts-pending" | "error";
 
 export type SyncOutcome =
 	// `merged`: paths merged from both sides and uploaded; `conflicts`: paths still waiting for
@@ -78,6 +78,7 @@ const SNAPSHOT_DAYS = 30;
 export class Orchestrator {
 	state: SyncState = "idle";
 	lastSyncAt: Date | null = null;
+	pendingConflicts = 0;
 	private current: Promise<SyncOutcome> | null = null;
 	private again = false;
 	private readonly listeners: (() => void)[] = [];
@@ -88,9 +89,15 @@ export class Orchestrator {
 		this.listeners.push(listener);
 	}
 
-	// Sorted by path.
-	conflicts(): Promise<PendingConflict[]> {
-		return this.deps.store.getConflicts();
+	// Sorted by path. Also refreshes the pending count, e.g. after a restart, unless a sync
+	// is running and will set it itself.
+	async conflicts(): Promise<PendingConflict[]> {
+		const records = await this.deps.store.getConflicts();
+		if (this.state === "idle" || this.state === "conflicts-pending") {
+			this.pendingConflicts = records.length;
+			this.setState(records.length ? "conflicts-pending" : "idle");
+		}
+		return records;
 	}
 
 	// Records the choice; the next sync applies it, which keeps the picker free of I/O.
@@ -119,7 +126,8 @@ export class Orchestrator {
 			outcome = await this.runOnce();
 			const ok = outcome.kind === "synced" || outcome.kind === "remote-empty";
 			if (ok) this.lastSyncAt = new Date();
-			this.setState(ok ? "idle" : "error");
+			if (outcome.kind === "synced") this.pendingConflicts = outcome.conflicts?.length ?? 0;
+			this.setState(ok ? (this.pendingConflicts ? "conflicts-pending" : "idle") : "error");
 		} while (this.again);
 		return outcome;
 	}
@@ -178,7 +186,15 @@ export class Orchestrator {
 
 		// A pending path keeps its base index entry and is left out of classification until the
 		// user's choice is applied; the rest of the vault syncs around it.
-		const records = await store.getConflicts();
+		// Theirs moved again since the picker was answered: the old answer no longer applies.
+		const refreshed: PendingConflict[] = [];
+		const records = (await store.getConflicts()).map((record) => {
+			const change = remote.get(record.path);
+			if (!change || change.kind === "removed" || change.sha === record.remoteSha) return record;
+			const update = { ...record, remoteSha: change.sha, ...remoteAuthor(headCommit), choice: null, siblingPath: null };
+			refreshed.push(update);
+			return update;
+		});
 		const applied = await this.applyChoices(context, records, index, remote);
 		const working = new Map(index);
 		for (const entry of applied.index) working.set(entry.path, entry);
@@ -197,7 +213,7 @@ export class Orchestrator {
 
 		const merged = await this.merge(context, outcomes, local, remote, working, headCommit);
 		const indexed = [...applied.index, ...sameOnBothSides(outcomes, local, remote), ...merged.downloaded];
-		const recordChanges = { put: merged.conflicts, remove: applied.resolved };
+		const recordChanges = { put: [...refreshed, ...merged.conflicts], remove: applied.resolved };
 		const stillPending = [...pending, ...merged.conflicts].map((r) => r.path).sort();
 		const downloads = [...outcomes].filter(([, o]) => o === "download").map(([path]) => path);
 		for (const path of downloads) {

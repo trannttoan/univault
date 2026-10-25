@@ -40,6 +40,11 @@ export class Workspace {
 	async openLinkText(linktext: string): Promise<void> {
 		this.opened.push(linktext);
 	}
+
+	// The layout is always ready in tests.
+	onLayoutReady(callback: () => unknown): void {
+		callback();
+	}
 }
 
 export class FakeElement {
