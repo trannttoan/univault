@@ -137,6 +137,17 @@ export class StateStore {
 		return done(tx);
 	}
 
+	// Read and write in one transaction, so a sync refreshing the record cannot interleave.
+	async answerConflict(path: string, remoteSha: string, choice: NonNullable<PendingConflict["choice"]>): Promise<boolean> {
+		const tx = this.db.transaction(CONFLICTS, "readwrite");
+		const store = tx.objectStore(CONFLICTS);
+		const record = await request<PendingConflict | undefined>(store.get(path));
+		const current = record?.remoteSha === remoteSha;
+		if (record && current) store.put({ ...record, choice });
+		await done(tx);
+		return current;
+	}
+
 	putSnapshot(snapshot: Snapshot): Promise<void> {
 		const tx = this.db.transaction(SNAPSHOTS, "readwrite");
 		tx.objectStore(SNAPSHOTS).put(snapshot);

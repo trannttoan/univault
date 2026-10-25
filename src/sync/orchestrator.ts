@@ -104,10 +104,10 @@ export class Orchestrator {
 		return records;
 	}
 
-	// Records the choice; the next sync applies it, which keeps the picker free of I/O.
-	async resolve(path: string, choice: Choice): Promise<void> {
-		const record = (await this.deps.store.getConflicts()).find((c) => c.path === path);
-		if (record) await this.deps.store.putConflict({ ...record, choice });
+	// Stores the answer for the next sync to apply, which keeps the picker free of I/O. False
+	// when theirs moved since the picker opened: the answer was about a version no longer there.
+	recordChoice(conflict: Pick<PendingConflict, "path" | "remoteSha">, choice: Choice): Promise<boolean> {
+		return this.deps.store.answerConflict(conflict.path, conflict.remoteSha, choice);
 	}
 
 	// Single flight: a call during a run schedules one follow-up run and shares its result.

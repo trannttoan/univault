@@ -50,7 +50,7 @@ export async function pickInTurn(app: App, orchestrator: Orchestrator, answered:
 	for (;;) {
 		const next = (await orchestrator.conflicts()).find((c) => c.choice === null);
 		if (!next) return;
-		await orchestrator.resolve(next.path, await pickConflict(app, next));
+		await orchestrator.recordChoice(next, await pickConflict(app, next));
 		answered();
 	}
 }

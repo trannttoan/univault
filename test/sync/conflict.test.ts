@@ -1,5 +1,6 @@
 import type { App } from "obsidian";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Choice } from "../../src/sync/orchestrator";
 import { pickConflict, pickInTurn } from "../../src/ui/conflict-picker";
 import { gitBlobSha } from "../../src/vault/hash";
 import { App as FakeApp, Modal } from "../fakes/obsidian";
@@ -12,6 +13,8 @@ const OURS = "Morning, first line.\nMorning, second line from B.\n\nEvening.\n";
 const A_TIME = "2026-10-25T07:41:00Z";
 const SIBLING = "Daily note (conflict from A 2026-10-25 14.03).md";
 const text = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes);
+const answer = async (h: Harness, path: string, choice: Choice) =>
+	h.orchestrator.recordChoice((await h.orchestrator.conflicts()).find((c) => c.path === path)!, choice);
 
 describe("same paragraph edited on two devices", () => {
 	let a: Harness;
@@ -71,7 +74,7 @@ describe("same paragraph edited on two devices", () => {
 
 		Modal.open[0]!.close();
 		expect(await choice).toBe("both");
-		await b.orchestrator.resolve(NOTE, "both");
+		await answer(b, NOTE, "both");
 
 		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 2, downloaded: 0 });
 		expect(await a.orchestrator.sync("manual")).toMatchObject({ kind: "synced", downloaded: 3 });
@@ -88,7 +91,7 @@ describe("same paragraph edited on two devices", () => {
 
 	it("keeps both by writing the sibling once when the push after it fails", async () => {
 		await b.orchestrator.sync("manual");
-		await b.orchestrator.resolve(NOTE, "both");
+		await answer(b, NOTE, "both");
 		b.github.inject("PATCH", /git\/refs/, "network");
 		expect((await b.orchestrator.sync("manual")).kind).toBe("failed");
 		expect(text(b.vault.bytes(SIBLING))).toBe(THEIRS);
@@ -101,7 +104,7 @@ describe("same paragraph edited on two devices", () => {
 	it("numbers the sibling when one from the same minute exists", async () => {
 		await b.orchestrator.sync("manual");
 		b.vault.setFile(SIBLING, "an older copy");
-		await b.orchestrator.resolve(NOTE, "both");
+		await answer(b, NOTE, "both");
 
 		await b.orchestrator.sync("manual");
 		expect(text(b.vault.bytes(SIBLING))).toBe("an older copy");
@@ -110,7 +113,7 @@ describe("same paragraph edited on two devices", () => {
 
 	it("keep mine: both devices end with B's version, from one commit by B", async () => {
 		await b.orchestrator.sync("manual");
-		await b.orchestrator.resolve(NOTE, "mine");
+		await answer(b, NOTE, "mine");
 		b.github.requests.length = 0;
 
 		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 1, downloaded: 0 });
@@ -123,7 +126,7 @@ describe("same paragraph edited on two devices", () => {
 
 	it("keep theirs: both devices end with A's version and B commits nothing for it", async () => {
 		await b.orchestrator.sync("manual");
-		await b.orchestrator.resolve(NOTE, "theirs");
+		await answer(b, NOTE, "theirs");
 		b.github.requests.length = 0;
 
 		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
@@ -139,7 +142,7 @@ describe("same paragraph edited on two devices", () => {
 
 	it("keep theirs after the note was edited again asks again instead of overwriting the edit", async () => {
 		await b.orchestrator.sync("manual");
-		await b.orchestrator.resolve(NOTE, "theirs");
+		await answer(b, NOTE, "theirs");
 		const edited = `${OURS}\nOne more thought.\n`;
 		b.vault.setFile(NOTE, edited);
 
@@ -151,7 +154,7 @@ describe("same paragraph edited on two devices", () => {
 
 		const choice = pickConflict(new FakeApp() as unknown as App, record!);
 		Modal.open[0]!.button("Keep theirs")!.click();
-		await b.orchestrator.resolve(NOTE, await choice);
+		await answer(b, NOTE, await choice);
 		await b.orchestrator.sync("manual");
 		expect(text(b.vault.bytes(NOTE))).toBe(THEIRS);
 		expect(await b.orchestrator.conflicts()).toEqual([]);
@@ -159,7 +162,7 @@ describe("same paragraph edited on two devices", () => {
 
 	it("keep theirs still applies when the note was only touched, not edited", async () => {
 		await b.orchestrator.sync("manual");
-		await b.orchestrator.resolve(NOTE, "theirs");
+		await answer(b, NOTE, "theirs");
 		b.vault.setFile(NOTE, OURS);
 
 		expect(await b.orchestrator.sync("manual")).toEqual({ kind: "synced", uploaded: 0, downloaded: 0 });
@@ -181,7 +184,7 @@ describe("same paragraph edited on two devices", () => {
 
 	it("refreshes the record when A edits the note again while it is pending, dropping an old answer", async () => {
 		await b.orchestrator.sync("manual");
-		await b.orchestrator.resolve(NOTE, "theirs");
+		await answer(b, NOTE, "theirs");
 		const again = "Morning, first line from A, edited again.\nMorning, second line.\n\nEvening.\n";
 		a.vault.setFile(NOTE, again);
 		await a.orchestrator.sync("manual");
@@ -193,10 +196,22 @@ describe("same paragraph edited on two devices", () => {
 		expect(text(b.vault.bytes(NOTE))).toBe(OURS);
 	});
 
+	it("drops an answer given in a picker opened before A pushed the note again", async () => {
+		await b.orchestrator.sync("manual");
+		const [shown] = await b.orchestrator.conflicts();
+		a.vault.setFile(NOTE, "Morning, first line from A, edited again.\nMorning, second line.\n\nEvening.\n");
+		await a.orchestrator.sync("manual");
+		await b.orchestrator.sync("manual");
+
+		expect(await b.orchestrator.recordChoice(shown!, "mine")).toBe(false);
+		expect((await b.orchestrator.conflicts())[0]).toMatchObject({ choice: null });
+		expect(await answer(b, NOTE, "mine")).toBe(true);
+	});
+
 	// B's answer is written to disk, its push fails, and A pushes the note again before B retries.
 	const answerThenFailedPush = async (choice: "theirs" | "both", again: string) => {
 		await b.orchestrator.sync("manual");
-		await b.orchestrator.resolve(NOTE, choice);
+		await answer(b, NOTE, choice);
 		b.vault.setFile("other.md", "o from B, again");
 		b.github.inject("PATCH", /git\/refs/, "network");
 		expect((await b.orchestrator.sync("manual")).kind).toBe("failed");
@@ -332,19 +347,19 @@ describe("two-sided changes that are never merged", () => {
 		};
 
 		it("keep mine", async () => {
-			await b.orchestrator.resolve(DAILY, "mine");
+			await answer(b, DAILY, "mine");
 			await converge();
 			expect(text(a.vault.bytes(DAILY))).toBe("# Today\n\nFrom B.\n");
 		});
 
 		it("keep theirs", async () => {
-			await b.orchestrator.resolve(DAILY, "theirs");
+			await answer(b, DAILY, "theirs");
 			await converge();
 			expect(text(a.vault.bytes(DAILY))).toBe("# Today\n\nFrom A.\n");
 		});
 
 		it("keep both", async () => {
-			await b.orchestrator.resolve(DAILY, "both");
+			await answer(b, DAILY, "both");
 			await converge();
 			expect(text(a.vault.bytes(DAILY))).toBe("# Today\n\nFrom B.\n");
 			expect(text(a.vault.bytes("2026-10-25 (conflict from A 2026-10-25 14.03).md"))).toBe("# Today\n\nFrom A.\n");
