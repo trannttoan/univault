@@ -3,7 +3,7 @@ import type { GitHubClient } from "../github/client";
 import type { VaultAdapter } from "../vault/adapter";
 import { gitBlobSha } from "../vault/hash";
 
-interface UploadFile {
+export interface UploadFile {
 	path: string;
 	vaultPath: string;
 	size: number;

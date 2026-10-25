@@ -70,6 +70,7 @@ it("classifies the union of both deltas", () => {
 			["down.md", remote("added", B)],
 			["same.md", remote("modified", A)],
 		]),
+		new Map(),
 	);
 	expect(Object.fromEntries(outcomes)).toEqual({ "up.md": "upload", "same.md": "noop", "down.md": "download" });
 });

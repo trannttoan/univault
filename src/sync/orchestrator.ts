@@ -6,7 +6,7 @@ import type { IndexEntry, PendingConflict, Snapshot, StateStore, SyncAnchor } fr
 import { MERGE_CAP_BYTES, type MergeResult, decodeText, isBinaryPath, merge } from "../merge/engine";
 import { siblingPath } from "../merge/sibling";
 import { download, readBlob, streamOf } from "../transfer/download";
-import { bootstrapBranch, uploadBlob } from "../transfer/upload";
+import { type UploadFile, bootstrapBranch, uploadBlob } from "../transfer/upload";
 import type { VaultAdapter } from "../vault/adapter";
 import { gitBlobSha } from "../vault/hash";
 import { canonicalizeRepoPath } from "../vault/paths";
@@ -46,12 +46,7 @@ interface Context {
 	settings: UnivaultSettings;
 }
 
-interface UploadFile {
-	path: string;
-	vaultPath: string;
-	mtime: number;
-	size: number;
-}
+type Upload = UploadFile & { mtime: number };
 
 type Changed = Extract<LocalChange, { vaultPath: string }>;
 
@@ -60,7 +55,7 @@ export type Choice = NonNullable<PendingConflict["choice"]>;
 interface Merged {
 	// The merge equals theirs: written locally, nothing to upload.
 	downloaded: IndexEntry[];
-	uploads: UploadFile[];
+	uploads: Upload[];
 	trailers: MergeTrailer[];
 	conflicts: PendingConflict[];
 }
@@ -241,7 +236,7 @@ export class Orchestrator {
 		indexed.push(...(await this.downloadedEntries(downloads, remote)));
 		const downloaded = downloads.length + merged.downloaded.length;
 
-		const uploads: UploadFile[] = [...outcomes]
+		const uploads: Upload[] = [...outcomes]
 			.filter(([, o]) => o === "upload")
 			.map(([path]) => ({ path, ...(local.get(path) as Changed) }));
 		const result = (uploaded: number) => ({
@@ -499,7 +494,7 @@ export class Orchestrator {
 		const files = [...local].filter(([, c]) => c.kind !== "deleted").sort(([a], [b]) => (a < b ? -1 : 1));
 		if (files.length === 0) return { kind: "remote-empty" };
 
-		const [path, change] = files[0] as [string, Extract<LocalChange, { vaultPath: string }>];
+		const [path, change] = files[0] as [string, Changed];
 		const message = commitMessage(settings.deviceName, login);
 		const file = { path, ...change };
 		const { repository, branch } = settings;

@@ -19,7 +19,7 @@ export function classify(local: LocalChange | undefined, remote: RemoteChange | 
 export function classifyAll(
 	local: Map<string, LocalChange>,
 	remote: Map<string, RemoteChange>,
-	index: Map<string, IndexEntry> = new Map(),
+	index: Map<string, IndexEntry>,
 ): Map<string, Outcome> {
 	const outcomes = new Map<string, Outcome>();
 	for (const path of new Set([...local.keys(), ...remote.keys()])) {
