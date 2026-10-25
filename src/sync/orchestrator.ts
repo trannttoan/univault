@@ -11,7 +11,7 @@ import type { VaultAdapter } from "../vault/adapter";
 import { gitBlobSha } from "../vault/hash";
 import { canonicalizeRepoPath } from "../vault/paths";
 import { classifyAll } from "./classify";
-import { type MergeTrailer, commitMessage, createSyncCommit } from "./commit";
+import { type MergeTrailer, commitMessage, createSyncCommit, deviceTrailer } from "./commit";
 import { type LocalChange, type LocalScan, localDelta } from "./local-delta";
 import { type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
 
@@ -525,7 +525,7 @@ export class Orchestrator {
 // "Who and when" for a conflict, from the head commit: its device trailer, else its author.
 // Wrong when several devices pushed since the anchor; device manifests revisit this.
 function remoteAuthor(commit: Commit | null): { remoteDevice: string; remoteTime: string } {
-	const device = commit && /^Univault-Device: [^/\n]+\/(.+)$/m.exec(commit.message)?.[1]?.trim();
+	const device = commit && deviceTrailer(commit.message)?.device;
 	return { remoteDevice: device || commit?.author.name || "another device", remoteTime: commit?.author.date ?? "" };
 }
 

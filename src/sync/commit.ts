@@ -17,6 +17,12 @@ export function commitMessage(deviceName: string, login: string, merges: MergeTr
 	return `Sync from ${device}\n\n${trailers.join("\n")}`;
 }
 
+// The Univault-Device trailer read back; null for a commit made outside Univault.
+export function deviceTrailer(message: string): { login: string; device: string } | null {
+	const match = /^Univault-Device: ([^/\n]+)\/(.+)$/m.exec(message);
+	return match?.[1] && match[2] ? { login: match[1], device: match[2].trim() } : null;
+}
+
 export async function createSyncCommit(
 	client: GitHubClient,
 	repository: string,
