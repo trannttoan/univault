@@ -327,8 +327,15 @@ export class Orchestrator {
 			const sha = await gitBlobSha(result.bytes);
 			let stat = { mtime: ours.mtime, size: ours.size };
 			if (sha !== ours.blobSha) {
-				if (!snapshot) await this.snapshot(path, oursBytes as Uint8Array, ours.blobSha, base, "pre-merge");
-				await vault.writeChunked(ours.vaultPath, streamOf(result.bytes), stat);
+				const taken = snapshot ? null : await this.snapshot(path, oursBytes as Uint8Array, ours.blobSha, base, "pre-merge");
+				try {
+					await vault.writeChunked(ours.vaultPath, streamOf(result.bytes), stat);
+				} catch (error) {
+					// Refused before touching the note, which the user changed: the retry snapshots that version.
+					const refused = error instanceof UnivaultError && error.code === "conflict-retry";
+					if (taken && refused) await this.deps.store.deleteSnapshot(taken);
+					throw error;
+				}
 				stat = await this.statWritten(path, ours.vaultPath);
 			}
 			if (sha === theirs) {

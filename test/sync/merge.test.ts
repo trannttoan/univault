@@ -102,6 +102,13 @@ describe("two devices editing different paragraphs", () => {
 		b.github.onRequest = null;
 		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", merged: [NOTE] });
 		expect(text(b.vault.bytes(NOTE))).toBe("Morning, from A.\n\nAfternoon.\n\nEvening, from B, still typing.\n");
+
+		// The merge's input was the typed version: it is the one snapshotted and named in the trailer.
+		const input = "Morning.\n\nAfternoon.\n\nEvening, from B, still typing.\n";
+		const snapshots = await b.store.getSnapshots();
+		expect(snapshots.map((s) => text(s.bytes))).toEqual([input]);
+		const trailer = b.github.commit(REPO, b.github.head(REPO, "main")!)!.message.split("\n").at(-1)!;
+		expect(trailer.split(" ").at(-2)).toBe(await gitBlobSha(new TextEncoder().encode(input)));
 	});
 });
 

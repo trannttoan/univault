@@ -143,6 +143,12 @@ export class StateStore {
 		return done(tx);
 	}
 
+	deleteSnapshot(id: string): Promise<void> {
+		const tx = this.db.transaction(SNAPSHOTS, "readwrite");
+		tx.objectStore(SNAPSHOTS).delete(id);
+		return done(tx);
+	}
+
 	async getSnapshot(id: string): Promise<Snapshot | null> {
 		const tx = this.db.transaction(SNAPSHOTS, "readonly");
 		return (await request<Snapshot | undefined>(tx.objectStore(SNAPSHOTS).get(id))) ?? null;
