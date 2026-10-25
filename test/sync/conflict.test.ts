@@ -45,6 +45,18 @@ describe("same paragraph edited on two devices", () => {
 		expect((await b.store.getIndex()).get(NOTE)?.blobSha).toBe(records[0]?.baseSha);
 	});
 
+	it("keeps one snapshot of B's version however often the push is rejected or the sync fails", async () => {
+		const rejected = { status: 422, body: { message: "Update is not a fast forward" } };
+		for (let attempt = 0; attempt < 4 * 2 + 2; attempt++) b.github.inject("PATCH", /git\/refs/, rejected);
+		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "failed" });
+		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "failed" });
+		expect(await b.orchestrator.sync("manual")).toMatchObject({ kind: "synced", conflicts: [NOTE] });
+
+		const snapshots = await b.store.getSnapshots();
+		expect(snapshots.map((s) => [s.reason, text(s.bytes)])).toEqual([["conflict-local", OURS]]);
+		expect((await b.orchestrator.conflicts())[0]?.localSnapshotId).toBe(snapshots[0]?.id);
+	});
+
 	it("shows one picker naming the file, the other device and the time; dismissing it keeps both on both devices", async () => {
 		await b.orchestrator.sync("manual");
 		const [record] = await b.orchestrator.conflicts();

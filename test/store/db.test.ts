@@ -101,7 +101,7 @@ describe("StateStore", () => {
 		expect(shape).toEqual(await layout(`univault-${freshId}`));
 	});
 
-	it("finds a snapshot by path and base, and prunes old ones except those kept", async () => {
+	it("finds a snapshot by path and fields, including a null base, and prunes old ones except those kept", async () => {
 		const store = await StateStore.open(crypto.randomUUID());
 		const snapshot = (id: string, createdAt: string): Snapshot => ({
 			id,
@@ -116,10 +116,13 @@ describe("StateStore", () => {
 		await store.putSnapshot(snapshot("kept", "2026-01-02T00:00:00.000Z"));
 		await store.putSnapshot(snapshot("new", "2026-03-01T00:00:00.000Z"));
 
-		expect((await store.findSnapshot("note.md", "b".repeat(40), "pre-merge"))?.bytes).toEqual(new Uint8Array([1, 2]));
-		expect(await store.findSnapshot("note.md", "b".repeat(40), "conflict-local")).toBeNull();
+		expect((await store.findSnapshot("note.md", { reason: "pre-merge", baseSha: "b".repeat(40) }))?.bytes).toEqual(new Uint8Array([1, 2]));
+		expect(await store.findSnapshot("note.md", { reason: "conflict-local" })).toBeNull();
+		await store.putSnapshot({ ...snapshot("added", "2026-03-02T00:00:00.000Z"), baseSha: null, reason: "conflict-local" });
+		expect((await store.findSnapshot("note.md", { reason: "conflict-local", baseSha: null }))?.id).toBe("added");
+		expect(await store.findSnapshot("other.md", {})).toBeNull();
 		await store.pruneSnapshots("2026-02-01T00:00:00.000Z", new Set(["kept"]));
-		expect((await store.getSnapshots()).map((s) => s.id).sort()).toEqual(["kept", "new"]);
+		expect((await store.getSnapshots()).map((s) => s.id).sort()).toEqual(["added", "kept", "new"]);
 		store.close();
 	});
 });

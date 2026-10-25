@@ -305,7 +305,7 @@ export class Orchestrator {
 					baseBytes && theirsBytes ? merge(baseBytes, oursBytes, theirsBytes, path) : { kind: "conflict", detail: "too-large" };
 			}
 			if (result.kind === "conflict") {
-				const snapshotId = oursBytes && (await this.snapshot(path, oursBytes, ours.blobSha, base, "conflict-local"));
+				const snapshotId = oursBytes && (await this.conflictSnapshot(path, oursBytes, ours.blobSha, base));
 				merged.conflicts.push({
 					path,
 					kind: result.detail === "binary" ? "binary" : "text-overlap",
@@ -323,7 +323,7 @@ export class Orchestrator {
 
 			// One snapshot per (path, base): a retry after the merged bytes landed must keep
 			// the original, not snapshot the merge, and the trailer names that original.
-			const snapshot = await this.deps.store.findSnapshot(path, base as string, "pre-merge");
+			const snapshot = await this.deps.store.findSnapshot(path, { reason: "pre-merge", baseSha: base });
 			const sha = await gitBlobSha(result.bytes);
 			let stat = { mtime: ours.mtime, size: ours.size };
 			if (sha !== ours.blobSha) {
@@ -402,7 +402,7 @@ export class Orchestrator {
 			if (sha === remoteSha) return { path, ...current, blobSha: sha, mode: FILE_MODE };
 			// Same bytes with a new mtime is not an edit.
 			if (sha !== record.localSha) {
-				const localSnapshotId = await this.snapshot(path, bytes, sha, record.baseSha, "conflict-local");
+				const localSnapshotId = await this.conflictSnapshot(path, bytes, sha, record.baseSha);
 				await store.putConflict({ ...record, choice: null, localSha: sha, localStat: current, localSnapshotId });
 				return null;
 			}
@@ -422,6 +422,12 @@ export class Orchestrator {
 		const createdAt = this.now().toISOString();
 		await this.deps.store.putSnapshot({ id, path, bytes, blobSha, baseSha, createdAt, reason });
 		return id;
+	}
+
+	// A retried cycle or a failed sync detects the same conflict again; it reuses the one copy.
+	private async conflictSnapshot(path: string, bytes: Uint8Array, blobSha: string, baseSha: string | null): Promise<string> {
+		const existing = await this.deps.store.findSnapshot(path, { reason: "conflict-local", baseSha, blobSha });
+		return existing?.id ?? this.snapshot(path, bytes, blobSha, baseSha, "conflict-local");
 	}
 
 	// Snapshots a pending conflict still points at are kept past the retention period.

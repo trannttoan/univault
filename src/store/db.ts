@@ -49,7 +49,7 @@ const INDEX = "index";
 const SNAPSHOTS = "snapshots";
 const CONFLICTS = "conflicts";
 const ANCHOR_KEY = "current";
-const BY_PATH_BASE = "by-path-base";
+const BY_PATH = "by-path";
 const BY_CREATED = "by-created";
 
 export class StateStore {
@@ -68,7 +68,7 @@ export class StateStore {
 				}
 				if (event.oldVersion < 2) {
 					const snapshots = db.createObjectStore(SNAPSHOTS, { keyPath: "id" });
-					snapshots.createIndex(BY_PATH_BASE, ["path", "baseSha"]);
+					snapshots.createIndex(BY_PATH, "path");
 					snapshots.createIndex(BY_CREATED, "createdAt");
 					db.createObjectStore(CONFLICTS, { keyPath: "path" });
 				}
@@ -148,10 +148,21 @@ export class StateStore {
 		return (await request<Snapshot | undefined>(tx.objectStore(SNAPSHOTS).get(id))) ?? null;
 	}
 
-	async findSnapshot(path: string, baseSha: string, reason: Snapshot["reason"]): Promise<Snapshot | null> {
+	// The first snapshot of `path` whose fields equal those in `match`; one held in memory at a time.
+	findSnapshot(path: string, match: Partial<Pick<Snapshot, "reason" | "baseSha" | "blobSha">>): Promise<Snapshot | null> {
 		const tx = this.db.transaction(SNAPSHOTS, "readonly");
-		const found = await request<Snapshot[]>(tx.objectStore(SNAPSHOTS).index(BY_PATH_BASE).getAll([path, baseSha]));
-		return found.find((snapshot) => snapshot.reason === reason) ?? null;
+		const cursor = tx.objectStore(SNAPSHOTS).index(BY_PATH).openCursor(IDBKeyRange.only(path));
+		return new Promise((resolve, reject) => {
+			cursor.onsuccess = () => {
+				const current = cursor.result;
+				if (!current) return resolve(null);
+				const snapshot = current.value as Snapshot;
+				const fits = Object.entries(match).every(([key, value]) => snapshot[key as keyof typeof match] === value);
+				if (fits) resolve(snapshot);
+				else current.continue();
+			};
+			cursor.onerror = () => reject(storageError(cursor.error));
+		});
 	}
 
 	async getSnapshots(): Promise<Snapshot[]> {
