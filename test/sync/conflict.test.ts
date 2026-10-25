@@ -137,11 +137,9 @@ describe("same paragraph edited on two devices", () => {
 		expect(record).toMatchObject({ choice: null, localSha: await gitBlobSha(new TextEncoder().encode(edited)) });
 		expect(text((await b.store.getSnapshot(record!.localSnapshotId!))?.bytes)).toBe(edited);
 
-		const app = new FakeApp();
-		void pickConflict(app as unknown as App, record!);
-		expect(Modal.open[0]?.button("Keep theirs")).toBeDefined();
-		Modal.open[0]?.button("Keep theirs")?.click();
-		await b.orchestrator.resolve(NOTE, "theirs");
+		const choice = pickConflict(new FakeApp() as unknown as App, record!);
+		Modal.open[0]!.button("Keep theirs")!.click();
+		await b.orchestrator.resolve(NOTE, await choice);
 		await b.orchestrator.sync("manual");
 		expect(text(b.vault.bytes(NOTE))).toBe(THEIRS);
 		expect(await b.orchestrator.conflicts()).toEqual([]);

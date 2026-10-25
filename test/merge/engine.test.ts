@@ -72,5 +72,6 @@ describe("merge", () => {
 		const base = lines(MAX_EDIT_LENGTH, "line");
 		const rewritten = lines(MAX_EDIT_LENGTH, "rewritten");
 		expect(run(base, rewritten, `${base}tail\n`)).toEqual({ kind: "conflict", detail: "too-large" });
+		expect(run(base, `${base}tail\n`, rewritten)).toEqual({ kind: "conflict", detail: "too-large" });
 	});
 });
