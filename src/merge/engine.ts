@@ -4,8 +4,8 @@ export type ConflictDetail = "overlap" | "binary" | "too-large";
 
 export type MergeResult = { kind: "merged"; bytes: Uint8Array } | { kind: "conflict"; detail: ConflictDetail };
 
-// Past this many inserted plus removed lines per side the diff gives up and the user decides.
-// Measured on the dev Mac at 1 MB: about 65 ms at 1,000, 210 ms at 2,000.
+// Past this many inserted plus removed lines per side the diff gives up and the user decides;
+// it bounds the diff's time. Measurements are in the TRD Memory rule.
 export const MAX_EDIT_LENGTH = 1000;
 // Per side; the caller checks it before reading, since a merge holds all three sides at once.
 export const MERGE_CAP_BYTES = 1024 * 1024;
