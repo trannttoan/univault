@@ -10,6 +10,7 @@ interface FakeCommit {
 	tree: string;
 	parents: string[];
 	message: string;
+	author: { name: string; date: string };
 }
 
 interface FakeRepo {
@@ -54,6 +55,8 @@ export class FakeGitHub {
 	blobChunkSize = 4;
 	// Runs before each request is handled, e.g. to let "another device" push mid-sync.
 	onRequest: ((method: string, path: string) => void) | null = null;
+	// Author date of new commits; GitHub sets it to the time of the request.
+	now: () => Date = () => new Date();
 	private readonly repos = new Map<string, FakeRepo>();
 	private readonly injected: { method: string; pattern: RegExp; response: Injected }[] = [];
 	private commitCounter = 0;
@@ -67,7 +70,13 @@ export class FakeGitHub {
 	}
 
 	// Seeds the remote as another device would: one commit on top of the branch head.
-	commitFiles(name: string, branch: string, files: Record<string, string | Uint8Array>, message = "seed"): string {
+	commitFiles(
+		name: string,
+		branch: string,
+		files: Record<string, string | Uint8Array>,
+		message = "seed",
+		author = "octo",
+	): string {
 		const repo = this.repo(name);
 		const head = repo.refs.get(branch);
 		const base = head ? repo.trees.get(repo.commits.get(head)!.tree)! : new Map();
@@ -76,7 +85,8 @@ export class FakeGitHub {
 			const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content;
 			tree.set(path, { mode: "100644", sha: this.storeBlob(repo, bytes) });
 		}
-		const sha = this.storeCommit(repo, { tree: this.storeTree(repo, tree), parents: head ? [head] : [], message });
+		const commit = { tree: this.storeTree(repo, tree), parents: head ? [head] : [], message, author: this.author(author) };
+		const sha = this.storeCommit(repo, commit);
 		repo.refs.set(branch, sha);
 		return sha;
 	}
@@ -176,6 +186,7 @@ export class FakeGitHub {
 				return json(200, {
 					sha: m[3],
 					message: commit.message,
+					author: { ...commit.author, email: `${commit.author.name}@example.com` },
 					tree: { sha: commit.tree },
 					parents: commit.parents.map((sha) => ({ sha })),
 				});
@@ -255,7 +266,8 @@ export class FakeGitHub {
 				if (!repo!.trees.has(tree) || parents.some((p) => !repo!.commits.has(p))) {
 					return json(422, { message: "Invalid tree or parent" });
 				}
-				return json(201, { sha: this.storeCommit(repo!, { message, tree, parents }) });
+				const author = this.author(this.login(req));
+				return json(201, { sha: this.storeCommit(repo!, { message, tree, parents, author }) });
 			},
 		},
 		{
@@ -284,7 +296,8 @@ export class FakeGitHub {
 				if (tree.has(path)) return json(422, { message: '"sha" wasn\'t supplied.' });
 				tree.set(path, { mode: "100644", sha: this.storeBlob(repo!, new Uint8Array(Buffer.from(content, "base64"))) });
 				const treeSha = this.storeTree(repo!, tree);
-				const sha = this.storeCommit(repo!, { message, tree: treeSha, parents: head ? [head] : [] });
+				const author = this.author(this.login(req));
+				const sha = this.storeCommit(repo!, { message, tree: treeSha, parents: head ? [head] : [], author });
 				repo!.refs.set(branch, sha);
 				return json(201, { content: { path }, commit: { sha, tree: { sha: treeSha } } });
 			},
@@ -300,6 +313,14 @@ export class FakeGitHub {
 		res.headers.set("x-ratelimit-remaining", String(this.rateLimitRemaining));
 		this.requests.push({ method, path, status: res.status });
 		return res;
+	}
+
+	private author(name: string): FakeCommit["author"] {
+		return { name, date: this.now().toISOString().replace(/\.\d{3}Z$/, "Z") };
+	}
+
+	private login(req: FakeRequest): string {
+		return this.tokens.get(req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "") ?? "unknown";
 	}
 
 	private repo(name: string): FakeRepo {

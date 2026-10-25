@@ -173,6 +173,16 @@ describe("GitHubClient", () => {
 		expect((await caught(put)).code).toBe("not-found");
 	});
 
+	it("reads a commit's message and author", async () => {
+		github.now = () => new Date("2026-10-25T14:03:09Z");
+		const sha = github.commitFiles(REPO, "main", { "a.md": "a" }, "Sync from A\n\nUnivault-Device: octo/A", "Toan");
+		expect(await client.getCommit(REPO, sha)).toMatchObject({
+			sha,
+			message: "Sync from A\n\nUnivault-Device: octo/A",
+			author: { name: "Toan", date: "2026-10-25T14:03:09Z" },
+		});
+	});
+
 	it("writes a commit through blobs, trees, commits and a fast-forward ref update", async () => {
 		const parent = github.commitFiles(REPO, "main", { "keep.md": "keep" });
 		const bytes = new Uint8Array([...Array(256).keys(), 13, 10]);

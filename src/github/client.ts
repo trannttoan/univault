@@ -69,11 +69,20 @@ export class GitHubClient {
 	}
 
 	async getCommit(repo: string, sha: string): Promise<Commit> {
-		const json = await this.json<{ sha: string; tree: { sha: string }; parents: { sha: string }[] }>(
-			"GET",
-			`${repoPath(repo)}/git/commits/${sha}`,
-		);
-		return { sha: json.sha, treeSha: json.tree.sha, parents: json.parents.map((p) => p.sha) };
+		const json = await this.json<{
+			sha: string;
+			tree: { sha: string };
+			parents: { sha: string }[];
+			message: string;
+			author: { name: string; date: string };
+		}>("GET", `${repoPath(repo)}/git/commits/${sha}`);
+		return {
+			sha: json.sha,
+			treeSha: json.tree.sha,
+			parents: json.parents.map((p) => p.sha),
+			message: json.message,
+			author: { name: json.author.name, date: json.author.date },
+		};
 	}
 
 	async getCompare(repo: string, base: string, head: string): Promise<Compare> {

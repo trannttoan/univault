@@ -8,6 +8,8 @@ export interface Commit {
 	sha: string;
 	treeSha: string;
 	parents: string[];
+	message: string;
+	author: { name: string; date: string };
 }
 
 export interface TreeEntry {
