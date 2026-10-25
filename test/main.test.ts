@@ -31,7 +31,7 @@ describe("UnivaultPlugin", () => {
 	let github: FakeGitHub;
 
 	beforeEach(async () => {
-		Modal.open.length = 0;
+		Modal.opened.length = 0;
 		github = new FakeGitHub();
 		github.addToken(TOKEN, "octo");
 		vi.stubGlobal("fetch", github.fetch);
@@ -159,14 +159,14 @@ describe("UnivaultPlugin", () => {
 		github.commitFiles("octo/vault", "main", { "n.md": "line from A\n" }, "Sync from A\n\nUnivault-Device: octo/A");
 		app.vault.setFile("n.md", "line from here\n");
 		expect(await plugin.syncNow()).toMatchObject({ kind: "synced", conflicts: ["n.md"] });
-		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));
-		expect(Modal.open[0]?.text()).toContain("n.md");
+		await vi.waitFor(() => expect(Modal.opened).toHaveLength(1));
+		expect(Modal.opened[0]?.text()).toContain("n.md");
 
-		Modal.open[0]?.close();
+		Modal.opened[0]?.close();
 		await vi.waitFor(() => expect([...app.vault.files.keys()].some((p) => p.startsWith("n (conflict from A "))).toBe(true));
 		await vi.waitFor(async () => expect(await plugin.orchestrator.listConflicts()).toEqual([]));
 		expect(new TextDecoder().decode(github.file("octo/vault", "main", "n.md"))).toBe("line from here\n");
-		expect(Modal.open).toHaveLength(0);
+		expect(Modal.opened).toHaveLength(0);
 	});
 
 	it("asks again after a restart about a conflict left unanswered, without syncing", async () => {
@@ -192,8 +192,8 @@ describe("UnivaultPlugin", () => {
 		fake = plugin as unknown as FakePlugin;
 		await plugin.onload();
 
-		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));
-		expect(Modal.open[0]?.text()).toContain("Phone (octo)");
+		await vi.waitFor(() => expect(Modal.opened).toHaveLength(1));
+		expect(Modal.opened[0]?.text()).toContain("Phone (octo)");
 		expect(fake.statusBarItems[0]?.text).toBe("Univault: 1 conflict");
 		expect(github.requests).toHaveLength(0);
 		expect((await plugin.store.getSnapshot("snap"))?.bytes).toEqual(ours);
@@ -204,9 +204,9 @@ describe("UnivaultPlugin", () => {
 		await plugin.store.putConflict(conflict({ path: "a.md", kind: "binary", baseSha: null, remoteTime: "" }));
 		command?.callback?.();
 		command?.callback?.();
-		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));
+		await vi.waitFor(() => expect(Modal.opened).toHaveLength(1));
 		await new Promise((resolve) => setTimeout(resolve, 10));
-		expect(Modal.open).toHaveLength(1);
+		expect(Modal.opened).toHaveLength(1);
 	});
 
 	it("discards the anchor at the next sync after the repository changes", async () => {

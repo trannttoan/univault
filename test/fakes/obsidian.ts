@@ -92,21 +92,21 @@ export class FakeElement {
 
 export class Modal {
 	// Modals currently open, oldest first.
-	static readonly open: Modal[] = [];
+	static readonly opened: Modal[] = [];
 	readonly titleEl = new FakeElement();
 	readonly contentEl = new FakeElement();
 
 	constructor(readonly app: App) {}
 
 	open(): void {
-		Modal.open.push(this);
+		Modal.opened.push(this);
 		this.onOpen();
 	}
 
 	close(): void {
-		const at = Modal.open.indexOf(this);
+		const at = Modal.opened.indexOf(this);
 		if (at < 0) return;
-		Modal.open.splice(at, 1);
+		Modal.opened.splice(at, 1);
 		this.onClose();
 	}
 

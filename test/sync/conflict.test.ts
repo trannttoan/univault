@@ -21,7 +21,7 @@ describe("same paragraph edited on two devices", () => {
 	let b: Harness;
 
 	beforeEach(async () => {
-		Modal.open.length = 0;
+		Modal.opened.length = 0;
 		a = await createHarness();
 		a.settings.deviceName = "A";
 		await a.inSync({ [NOTE]: BASE, "other.md": "o" });
@@ -66,13 +66,13 @@ describe("same paragraph edited on two devices", () => {
 		const app = new FakeApp();
 		const choice = pickConflict(app as unknown as App, record!);
 
-		expect(Modal.open).toHaveLength(1);
-		const shown = Modal.open[0]!.text();
+		expect(Modal.opened).toHaveLength(1);
+		const shown = Modal.opened[0]!.text();
 		expect(shown).toContain(NOTE);
 		expect(shown).toContain("A (octo)");
 		expect(shown).toContain(new Date(A_TIME).toLocaleString());
 
-		Modal.open[0]!.close();
+		Modal.opened[0]!.close();
 		expect(await choice).toBe("both");
 		await answer(b, NOTE, "both");
 
@@ -153,7 +153,7 @@ describe("same paragraph edited on two devices", () => {
 		expect(text((await b.store.getSnapshot(record!.localSnapshotId!))?.bytes)).toBe(edited);
 
 		const choice = pickConflict(new FakeApp() as unknown as App, record!);
-		Modal.open[0]!.button("Keep theirs")!.click();
+		Modal.opened[0]!.button("Keep theirs")!.click();
 		await answer(b, NOTE, await choice);
 		await b.orchestrator.sync("manual");
 		expect(text(b.vault.bytes(NOTE))).toBe(THEIRS);
@@ -176,9 +176,9 @@ describe("same paragraph edited on two devices", () => {
 		const app = new FakeApp() as unknown as App;
 		for (const [label, expected] of [["Keep mine", "mine"], ["Keep theirs", "theirs"], ["Keep both", "both"]] as const) {
 			const choice = pickConflict(app, record!);
-			Modal.open[0]?.button(label)?.click();
+			Modal.opened[0]?.button(label)?.click();
 			expect(await choice).toBe(expected);
-			expect(Modal.open).toHaveLength(0);
+			expect(Modal.opened).toHaveLength(0);
 		}
 	});
 
@@ -262,13 +262,13 @@ describe("same paragraph edited on two devices", () => {
 		let answered = 0;
 		const app = new FakeApp() as unknown as App;
 		const done = pickInTurn(app, b.orchestrator, () => answered++);
-		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));
-		expect(Modal.open[0]?.text()).toContain(NOTE);
-		Modal.open[0]?.button("Keep mine")?.click();
+		await vi.waitFor(() => expect(Modal.opened).toHaveLength(1));
+		expect(Modal.opened[0]?.text()).toContain(NOTE);
+		Modal.opened[0]?.button("Keep mine")?.click();
 
-		await vi.waitFor(() => expect(Modal.open[0]?.text()).toContain("other.md"));
-		expect(Modal.open).toHaveLength(1);
-		Modal.open[0]?.close();
+		await vi.waitFor(() => expect(Modal.opened[0]?.text()).toContain("other.md"));
+		expect(Modal.opened).toHaveLength(1);
+		Modal.opened[0]?.close();
 		await done;
 
 		expect(answered).toBe(2);
@@ -285,7 +285,7 @@ describe("two-sided changes that are never merged", () => {
 	const blobReads = (h: Harness) => h.github.requests.filter((r) => r.method === "GET" && r.path.includes("/git/blobs/"));
 
 	beforeEach(async () => {
-		Modal.open.length = 0;
+		Modal.opened.length = 0;
 		a = await createHarness();
 		a.settings.deviceName = "A";
 		const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1]);
@@ -314,7 +314,7 @@ describe("two-sided changes that are never merged", () => {
 
 		const app = new FakeApp() as unknown as App;
 		void pickConflict(app, record!);
-		expect(Modal.open[0]?.text()).toContain(path);
+		expect(Modal.opened[0]?.text()).toContain(path);
 	});
 
 	it("does not merge when theirs is over the cap, and stops reading it there", async () => {

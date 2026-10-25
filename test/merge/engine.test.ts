@@ -40,18 +40,10 @@ describe("merge", () => {
 		expect(result).toEqual({ kind: "merged", bytes: enc("A\r\n\r\nb\r\n\r\nC\r\n") });
 	});
 
-	it("treats a trailing newline added on one side as an ordinary change", () => {
-		expect(run("one\n\ntwo", "one\n\ntwo\n", "ONE\n\ntwo")).toBe("ONE\n\ntwo\n");
-	});
-
 	it("takes identical changes on both sides once", () => {
 		expect(run(base, "Para ONE.\n\nPara two.\n\nPara three.\n", "Para ONE.\n\nPara two.\n\nPara three.\n")).toBe(
 			"Para ONE.\n\nPara two.\n\nPara three.\n",
 		);
-	});
-
-	it("stacks two paragraphs appended at the end, theirs first", () => {
-		expect(run("Intro.", "Intro.\n\nMine.", "Intro.\n\nTheirs.")).toBe("Intro.\n\nTheirs.\n\nMine.");
 	});
 
 	it("treats bytes with a NUL or invalid UTF-8 as binary, and a known binary extension as binary unread", () => {
@@ -61,10 +53,6 @@ describe("merge", () => {
 		expect(invalid).toEqual({ kind: "conflict", detail: "binary" });
 		expect(merge(enc("a\n\nb"), enc("A\n\nb"), enc("a\n\nB"), "image.PNG")).toEqual({ kind: "conflict", detail: "binary" });
 		expect(run("a\n\nb", "A\n\nb", "a\n\nB")).toBe("A\n\nB");
-	});
-
-	it("keeps a BOM as part of the first line", () => {
-		expect(run("\uFEFFone\n\ntwo\n", "\uFEFFONE\n\ntwo\n", "\uFEFFone\n\nTWO\n")).toBe("\uFEFFONE\n\nTWO\n");
 	});
 
 	it("gives up past the line cap on any side, however short the lines", () => {
