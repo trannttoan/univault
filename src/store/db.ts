@@ -40,6 +40,8 @@ export interface PendingConflict {
 	localStat: { mtime: number; size: number };
 	localSnapshotId: string | null;
 	choice: "mine" | "theirs" | "both" | null;
+	// Where keep both writes theirs; chosen once, so a retried sync reuses it.
+	siblingPath: string | null;
 }
 
 const ANCHOR = "anchor";
@@ -170,10 +172,12 @@ export class StateStore {
 		return done(tx);
 	}
 
+	// Conflicts belong to the anchor's repository; snapshots stay for their retention period.
 	discardAnchor(): Promise<void> {
-		const tx = this.db.transaction([ANCHOR, INDEX], "readwrite");
+		const tx = this.db.transaction([ANCHOR, INDEX, CONFLICTS], "readwrite");
 		tx.objectStore(ANCHOR).clear();
 		tx.objectStore(INDEX).clear();
+		tx.objectStore(CONFLICTS).clear();
 		return done(tx);
 	}
 }

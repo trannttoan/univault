@@ -1,0 +1,41 @@
+import { type App, Modal } from "obsidian";
+import type { PendingConflict } from "../store/db";
+import type { Choice } from "../sync/orchestrator";
+
+const CHOICES: [Choice, string][] = [["both", "Keep both"]];
+
+// Only records the answer; the orchestrator applies it at the next sync. Closing without
+// an answer (Escape, the close button) keeps both.
+export class ConflictPicker extends Modal {
+	private chosen: Choice | null = null;
+
+	constructor(
+		app: App,
+		private readonly conflict: PendingConflict,
+		private readonly onChoose: (choice: Choice) => void,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		const { path, remoteDevice, remoteTime } = this.conflict;
+		this.setTitle(`Conflict in ${path}`);
+		const when = remoteTime ? ` on ${new Date(remoteTime).toLocaleString()}` : "";
+		this.contentEl.createEl("p", { text: `Changed on this device and on ${remoteDevice}${when}.` });
+		for (const [choice, label] of CHOICES) {
+			this.contentEl.createEl("button", { text: label }).addEventListener("click", () => {
+				this.chosen = choice;
+				this.close();
+			});
+		}
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
+		this.onChoose(this.chosen ?? "both");
+	}
+}
+
+export function pickConflict(app: App, conflict: PendingConflict): Promise<Choice> {
+	return new Promise((resolve) => new ConflictPicker(app, conflict, resolve).open());
+}

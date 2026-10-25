@@ -118,15 +118,16 @@ describe("upload cycle", () => {
 		expect(h.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
 	});
 
-	it("fails before writing anything when both sides changed a note differently", async () => {
+	it("holds back a note both sides changed in the same line and uploads the rest", async () => {
 		await h.inSync({ "a.md": "base", "b.md": "b" });
 		h.github.commitFiles(REPO, "main", { "a.md": "theirs" });
 		h.vault.setFile("a.md", "ours");
 		h.vault.setFile("b.md", "ours too");
 
 		const outcome = await h.orchestrator.sync("manual");
-		expect(outcome.kind === "failed" && outcome.error).toMatchObject({ code: "conflict-retry", paths: ["a.md"] });
-		expect(h.github.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
+		expect(outcome).toEqual({ kind: "synced", uploaded: 1, downloaded: 0, conflicts: ["a.md"] });
 		expect(new TextDecoder().decode(h.vault.bytes("a.md"))).toBe("ours");
+		expect(new TextDecoder().decode(h.github.file(REPO, "main", "a.md"))).toBe("theirs");
+		expect(new TextDecoder().decode(h.github.file(REPO, "main", "b.md"))).toBe("ours too");
 	});
 });

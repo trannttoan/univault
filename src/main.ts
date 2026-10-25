@@ -3,6 +3,7 @@ import { SessionStore } from "./session";
 import { UnivaultSettingTab, type UnivaultSettings, defaultSettings, readSettings } from "./settings";
 import { StateStore } from "./store/db";
 import { Orchestrator, type SyncOutcome } from "./sync/orchestrator";
+import { pickConflict } from "./ui/conflict-picker";
 import { outcomeMessage } from "./ui/messages";
 import { statusText } from "./ui/status-bar";
 import { ObsidianVaultAdapter } from "./vault/obsidian-adapter";
@@ -15,6 +16,7 @@ export default class UnivaultPlugin extends Plugin {
 	orchestrator!: Orchestrator;
 	private saving: Promise<void> = Promise.resolve();
 	private notifying: Promise<SyncOutcome> | null = null;
+	private picking = false;
 
 	async onload(): Promise<void> {
 		this.defaults = defaultSettings(Platform);
@@ -68,7 +70,24 @@ export default class UnivaultPlugin extends Plugin {
 				void this.app.workspace.openLinkText(path, "", false);
 			});
 		}
+		if (outcome.kind === "synced" && outcome.conflicts) void this.resolveConflicts();
 		return outcome;
+	}
+
+	// One picker at a time, in path order. Each answer is stored and applied by a sync.
+	async resolveConflicts(): Promise<void> {
+		if (this.picking) return;
+		this.picking = true;
+		try {
+			for (;;) {
+				const next = (await this.orchestrator.conflicts()).find((c) => c.choice === null);
+				if (!next) return;
+				await this.orchestrator.resolve(next.path, await pickConflict(this.app, next));
+				void this.syncNow();
+			}
+		} finally {
+			this.picking = false;
+		}
 	}
 
 	// The orchestrator discards an anchor for another repository or branch at the next sync.

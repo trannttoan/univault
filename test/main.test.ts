@@ -4,7 +4,7 @@ import manifest from "../manifest.json";
 import UnivaultPlugin from "../src/main";
 import { readSettings } from "../src/settings";
 import { FakeGitHub } from "./fakes/github";
-import { App as FakeApp, type Plugin as FakePlugin, Notice } from "./fakes/obsidian";
+import { App as FakeApp, type Plugin as FakePlugin, Modal, Notice } from "./fakes/obsidian";
 
 const TOKEN = "github_pat_secret123";
 
@@ -15,6 +15,7 @@ describe("UnivaultPlugin", () => {
 	let github: FakeGitHub;
 
 	beforeEach(async () => {
+		Modal.open.length = 0;
 		github = new FakeGitHub();
 		github.addToken(TOKEN, "octo");
 		vi.stubGlobal("fetch", github.fetch);
@@ -130,6 +131,26 @@ describe("UnivaultPlugin", () => {
 		expect(link?.text).toBe("Review n.md");
 		link?.click();
 		expect(app.workspace.opened).toEqual(["n.md"]);
+	});
+
+	it("opens a picker after a sync that leaves a conflict, and applies its dismissal as keep both", async () => {
+		github.createRepo("octo/vault");
+		github.commitFiles("octo/vault", "main", { "n.md": "line\n" });
+		await plugin.session.signInWithToken(TOKEN);
+		await plugin.updateSettings({ repository: "octo/vault" });
+		await plugin.syncNow();
+
+		github.commitFiles("octo/vault", "main", { "n.md": "line from A\n" }, "Sync from A\n\nUnivault-Device: octo/A");
+		app.vault.setFile("n.md", "line from here\n");
+		expect(await plugin.syncNow()).toMatchObject({ kind: "synced", conflicts: ["n.md"] });
+		await vi.waitFor(() => expect(Modal.open).toHaveLength(1));
+		expect(Modal.open[0]?.text()).toContain("n.md");
+
+		Modal.open[0]?.close();
+		await vi.waitFor(() => expect([...app.vault.files.keys()].some((p) => p.startsWith("n (conflict from A "))).toBe(true));
+		await vi.waitFor(async () => expect(await plugin.orchestrator.conflicts()).toEqual([]));
+		expect(new TextDecoder().decode(github.file("octo/vault", "main", "n.md"))).toBe("line from here\n");
+		expect(Modal.open).toHaveLength(0);
 	});
 
 	it("discards the anchor at the next sync after the repository changes", async () => {

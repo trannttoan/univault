@@ -80,7 +80,48 @@ export class FakeElement {
 		this.classes.push(name);
 	}
 
-	empty(): void {}
+	empty(): void {
+		this.children.length = 0;
+	}
+}
+
+export class Modal {
+	// Modals currently open, oldest first.
+	static readonly open: Modal[] = [];
+	readonly titleEl = new FakeElement();
+	readonly contentEl = new FakeElement();
+
+	constructor(readonly app: App) {}
+
+	open(): void {
+		Modal.open.push(this);
+		this.onOpen();
+	}
+
+	close(): void {
+		const at = Modal.open.indexOf(this);
+		if (at < 0) return;
+		Modal.open.splice(at, 1);
+		this.onClose();
+	}
+
+	setTitle(title: string): this {
+		this.titleEl.setText(title);
+		return this;
+	}
+
+	onOpen(): void {}
+
+	onClose(): void {}
+
+	// Title and content text, for assertions.
+	text(): string {
+		return [this.titleEl.text, ...this.contentEl.descendants().map((el) => el.text)].join("\n");
+	}
+
+	button(label: string): FakeElement | undefined {
+		return this.contentEl.descendants().find((el) => el.tag === "button" && el.text === label);
+	}
 }
 
 export class Notice {

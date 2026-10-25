@@ -1,8 +1,10 @@
 import { UnivaultError } from "../errors";
 import type { GitHubClient } from "../github/client";
+import type { Commit } from "../github/types";
 import type { UnivaultSettings } from "../settings";
-import type { IndexEntry, Snapshot, StateStore, SyncAnchor } from "../store/db";
+import type { IndexEntry, PendingConflict, Snapshot, StateStore, SyncAnchor } from "../store/db";
 import { merge } from "../merge/engine";
+import { siblingPath } from "../merge/sibling";
 import { download, readBlob, streamOf } from "../transfer/download";
 import { bootstrapBranch, uploadBlob } from "../transfer/upload";
 import type { VaultAdapter } from "../vault/adapter";
@@ -16,8 +18,9 @@ import { type RemoteChange, checkHead, remoteDelta } from "./remote-delta";
 export type SyncState = "idle" | "syncing" | "error";
 
 export type SyncOutcome =
-	// `merged`: paths merged from both sides and uploaded, present only when there are some.
-	| { kind: "synced"; uploaded: number; downloaded: number; merged?: string[] }
+	// `merged`: paths merged from both sides and uploaded; `conflicts`: paths still waiting for
+	// a choice after this sync. Each is present only when it has entries.
+	| { kind: "synced"; uploaded: number; downloaded: number; merged?: string[]; conflicts?: string[] }
 	| { kind: "remote-empty" }
 	| { kind: "needs-setup" }
 	| { kind: "failed"; error: UnivaultError };
@@ -48,11 +51,23 @@ interface UploadFile {
 
 type Changed = Extract<LocalChange, { vaultPath: string }>;
 
+export type Choice = NonNullable<PendingConflict["choice"]>;
+
 interface Merged {
 	// The merge equals theirs: written locally, nothing to upload.
 	downloaded: IndexEntry[];
 	uploads: UploadFile[];
 	trailers: MergeTrailer[];
+	conflicts: PendingConflict[];
+}
+
+// What applying the recorded choices did, before the local scan.
+interface Applied {
+	// Index entries replacing the base for resolved paths.
+	index: IndexEntry[];
+	// Files written by a resolution, which the vault's file list may not show yet.
+	added: Map<string, Changed>;
+	resolved: string[];
 }
 
 const REPOSITORY = /^[\w.-]+\/[\w.-]+$/;
@@ -71,6 +86,17 @@ export class Orchestrator {
 
 	onChange(listener: () => void): void {
 		this.listeners.push(listener);
+	}
+
+	// Sorted by path.
+	conflicts(): Promise<PendingConflict[]> {
+		return this.deps.store.getConflicts();
+	}
+
+	// Records the choice; the next sync applies it, which keeps the picker free of I/O.
+	async resolve(path: string, choice: Choice): Promise<void> {
+		const record = (await this.deps.store.getConflicts()).find((c) => c.path === path);
+		if (record) await this.deps.store.putConflict({ ...record, choice });
 	}
 
 	// Single flight: a call during a run schedules one follow-up run and shares its result.
@@ -140,22 +166,39 @@ export class Orchestrator {
 			return this.bootstrap(context, index);
 		}
 		let head = anchor ? { commitSha: anchor.commitSha, treeSha: anchor.treeSha } : null;
+		let headCommit: Commit | null = null;
 		let remote = new Map<string, RemoteChange>();
 		if (check.kind === "changed") {
-			head = { commitSha: check.sha, treeSha: (await client.getCommit(repository, check.sha)).treeSha };
+			headCommit = await client.getCommit(repository, check.sha);
+			head = { commitSha: check.sha, treeSha: headCommit.treeSha };
 			const canonical = (path: string) => canonicalizeRepoPath(path, this.deps.configDir, this.deps.pluginDir);
 			remote = await remoteDelta(client, repository, anchor, head, index, canonical);
 		}
 		if (!head) throw new UnivaultError("unknown", { cause: new Error("No head without an anchor") });
 
-		const scan = await this.scan(index);
+		// A pending path keeps its base index entry and is left out of classification until the
+		// user's choice is applied; the rest of the vault syncs around it.
+		const records = await store.getConflicts();
+		const applied = await this.applyChoices(context, records, index, remote);
+		const working = new Map(index);
+		for (const entry of applied.index) working.set(entry.path, entry);
+		const pending = records.filter((r) => !applied.resolved.includes(r.path));
+
+		const scan = await this.scan(working);
 		const local = scan.changes;
-		const outcomes = classifyAll(local, remote, index);
+		for (const [path, change] of applied.added) local.set(path, change);
+		for (const { path } of pending) {
+			local.delete(path);
+			remote.delete(path);
+		}
+		const outcomes = classifyAll(local, remote, working);
 		const conflicts = [...outcomes].filter(([, o]) => o === "conflict").map(([path]) => path);
 		if (conflicts.length) throw new UnivaultError("conflict-retry", { paths: conflicts.sort() });
 
-		const merged = await this.merge(context, outcomes, local, remote, index);
-		const indexed = [...sameOnBothSides(outcomes, local, remote), ...merged.downloaded];
+		const merged = await this.merge(context, outcomes, local, remote, working, headCommit);
+		const indexed = [...applied.index, ...sameOnBothSides(outcomes, local, remote), ...merged.downloaded];
+		const recordChanges = { put: merged.conflicts, remove: applied.resolved };
+		const stillPending = [...pending, ...merged.conflicts].map((r) => r.path).sort();
 		const downloads = [...outcomes].filter(([, o]) => o === "download").map(([path]) => path);
 		for (const path of downloads) {
 			// Expected stat: the scan's for listed files, else the one recorded at the last download
@@ -177,10 +220,12 @@ export class Orchestrator {
 			uploaded,
 			downloaded,
 			...(merged.uploads.length ? { merged: merged.uploads.map((u) => u.path) } : {}),
+			...(stillPending.length ? { conflicts: stillPending } : {}),
 		});
 		if (uploads.length + merged.uploads.length === 0) {
 			const next: SyncAnchor = { repository, branch, ...head, refEtag: check.etag };
-			if (check.kind === "changed" || check.etag !== anchor?.refEtag || indexed.length) await store.advance(next, indexed);
+			const changed = check.kind === "changed" || check.etag !== anchor?.refEtag || indexed.length || applied.resolved.length;
+			if (changed) await store.advance(next, indexed, recordChanges);
 			return result(0);
 		}
 
@@ -200,7 +245,8 @@ export class Orchestrator {
 			throw error;
 		}
 		const refEtag = await this.etagFor(client, repository, branch, commit.commitSha);
-		await store.advance({ repository, branch, ...commit, refEtag }, [...entries, ...indexed]);
+		// Later entries win: an upload replaces a resolution's placeholder entry for the same path.
+		await store.advance({ repository, branch, ...commit, refEtag }, [...indexed, ...entries], recordChanges);
 		return result(uploads.length);
 	}
 
@@ -212,10 +258,11 @@ export class Orchestrator {
 		local: Map<string, LocalChange>,
 		remote: Map<string, RemoteChange>,
 		index: Map<string, IndexEntry>,
+		headCommit: Commit | null,
 	): Promise<Merged> {
 		const { client, settings } = context;
 		const { vault } = this.deps;
-		const merged: Merged = { downloaded: [], uploads: [], trailers: [] };
+		const merged: Merged = { downloaded: [], uploads: [], trailers: [], conflicts: [] };
 		const paths = [...outcomes].filter(([, o]) => o === "merge").map(([path]) => path);
 		for (const path of paths.sort()) {
 			const ours = local.get(path) as Changed;
@@ -228,7 +275,22 @@ export class Orchestrator {
 				await readBlob(client, settings.repository, theirs),
 				path,
 			);
-			if (result.kind === "conflict") throw new UnivaultError("conflict-retry", { paths: [path] });
+			if (result.kind === "conflict") {
+				const snapshotId = await this.snapshot(path, oursBytes, ours.blobSha, base, "conflict-local");
+				merged.conflicts.push({
+					path,
+					kind: result.detail === "binary" ? "binary" : "text-overlap",
+					baseSha: base,
+					remoteSha: theirs,
+					...remoteAuthor(headCommit),
+					localSha: ours.blobSha,
+					localStat: { mtime: ours.mtime, size: ours.size },
+					localSnapshotId: snapshotId,
+					choice: null,
+					siblingPath: null,
+				});
+				continue;
+			}
 
 			// One snapshot per (path, base): a retry after the merged bytes landed must keep
 			// the original, not snapshot the merge, and the trailer names that original.
@@ -248,6 +310,39 @@ export class Orchestrator {
 			}
 		}
 		return merged;
+	}
+
+	// Writes what each chosen resolution needs on disk before the scan. Keep mine and keep both
+	// point the index at theirs, so the scan reads ours as a change to upload over it.
+	private async applyChoices(
+		context: Context,
+		records: PendingConflict[],
+		index: Map<string, IndexEntry>,
+		remote: Map<string, RemoteChange>,
+	): Promise<Applied> {
+		const { client, settings } = context;
+		const { store, vault } = this.deps;
+		const applied: Applied = { index: [], added: new Map(), resolved: [] };
+		for (const record of records) {
+			if (record.choice !== "both") continue;
+			let sibling = record.siblingPath;
+			if (!sibling) {
+				for (let n = 1; !sibling; n++) {
+					const candidate = siblingPath(record.path, record.remoteDevice, this.now(), n);
+					const taken = index.has(candidate) || remote.has(candidate) || (await vault.exists(candidate));
+					if (!taken) sibling = candidate;
+				}
+				await store.putConflict({ ...record, siblingPath: sibling });
+			}
+			let blobSha = record.remoteSha;
+			if (await vault.exists(sibling)) blobSha = await gitBlobSha(await vault.read(sibling));
+			else await download(client, settings.repository, vault, sibling, record.remoteSha, null);
+			const stat = await this.statWritten(sibling, sibling);
+			applied.added.set(sibling, { kind: "added", vaultPath: sibling, blobSha, ...stat });
+			applied.index.push({ path: record.path, mtime: 0, size: 0, blobSha: record.remoteSha, mode: FILE_MODE });
+			applied.resolved.push(record.path);
+		}
+		return applied;
 	}
 
 	private async snapshot(
@@ -332,6 +427,13 @@ export class Orchestrator {
 		this.state = state;
 		for (const listener of this.listeners) listener();
 	}
+}
+
+// "Who and when" for a conflict, from the head commit: its device trailer, else its author.
+// Wrong when several devices pushed since the anchor; device manifests revisit this.
+function remoteAuthor(commit: Commit | null): { remoteDevice: string; remoteTime: string } {
+	const device = commit && /^Univault-Device: [^/\n]+\/(.+)$/m.exec(commit.message)?.[1]?.trim();
+	return { remoteDevice: device || commit?.author.name || "another device", remoteTime: commit?.author.date ?? "" };
 }
 
 // Paths both sides changed to the same content: nothing to transfer, but the index learns them.
