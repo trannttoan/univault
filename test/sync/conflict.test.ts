@@ -220,7 +220,7 @@ describe("two-sided changes that are never merged", () => {
 		a = await createHarness();
 		a.settings.deviceName = "A";
 		const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1]);
-		await a.inSync({ "pic.png": png, "nul.md": "a\0\n", "big.md": "x".repeat(40), "plain.md": "p" });
+		await a.inSync({ "pic.png": png, "nul.md": "a\0\n", "big.md": "x".repeat(40), "big.png": "x".repeat(40), "plain.md": "p" });
 		b = await a.fork("B");
 		b.now = () => new Date(2026, 9, 25, 14, 3);
 	});
@@ -229,6 +229,7 @@ describe("two-sided changes that are never merged", () => {
 		["pic.png", new Uint8Array([0x89, 0x50, 0x4e, 0x47, 2]), new Uint8Array([0x89, 0x50, 0x4e, 0x47, 3]), "binary"],
 		["nul.md", "a\0\nfrom A\n", "a\0\nfrom B\n", "binary"],
 		["big.md", `${"x".repeat(40)}\n\nfrom A`, `from B\n\n${"x".repeat(40)}`, "text-overlap"],
+		["big.png", `${"x".repeat(40)}A`, `${"x".repeat(40)}B`, "binary"],
 	] as const)("%s changed on both sides opens a picker without reading a blob", async (path, theirs, ours, kind) => {
 		b.mergeCapBytes = 32;
 		a.vault.setFile(path, theirs);
@@ -240,7 +241,7 @@ describe("two-sided changes that are never merged", () => {
 		expect(blobReads(b)).toEqual([]);
 		const [record] = await b.orchestrator.conflicts();
 		expect(record).toMatchObject({ path, kind });
-		expect(record?.localSnapshotId === null).toBe(path === "big.md");
+		expect(record?.localSnapshotId === null).toBe(path.startsWith("big."));
 
 		const app = new FakeApp() as unknown as App;
 		void pickConflict(app, record!);

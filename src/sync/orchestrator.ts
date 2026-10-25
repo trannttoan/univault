@@ -294,8 +294,8 @@ export class Orchestrator {
 			// Over the cap nothing is read: ours stays on disk untouched until the user answers.
 			const oursBytes = ours.size <= cap ? await vault.read(ours.vaultPath) : null;
 			let result: MergeResult;
-			if (!oursBytes) result = { kind: "conflict", detail: "too-large" };
-			else if (isBinaryPath(path) || decodeText(oursBytes) === null) result = { kind: "conflict", detail: "binary" };
+			if (isBinaryPath(path) || (oursBytes && decodeText(oursBytes) === null)) result = { kind: "conflict", detail: "binary" };
+			else if (!oursBytes) result = { kind: "conflict", detail: "too-large" };
 			// Added on both sides: no base to merge against, so the user decides.
 			else if (base === null) result = { kind: "conflict", detail: "overlap" };
 			else {
