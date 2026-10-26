@@ -65,15 +65,16 @@ Status: Accepted · 2026-10-25
 
 ### Alternatives rejected
 
-- `node-diff3` as the merge core, as the TRD first named it: too slow on markdown (see Why), and it has no way to plug in a faster diff.
-- Lines that end with their newline, the conventional split: breaks the headline case of two devices appending.
-- A within-N-lines overlap window (spike S8's other candidate). Measured 2026-10-25 against the 47-case corpus with windows of 0 to 5 lines, and none matched it:
+- **`node-diff3` as the merge core**, as the TRD first named it: too slow on markdown (see Why), and it has no way to plug in a faster diff.
+- **Lines that end with their newline**, the conventional split: breaks the headline case of two devices appending.
+- **A within-N-lines overlap window** (spike S8's other candidate). Measured 2026-10-25 against the 47-case corpus with windows of 0 to 5 lines, and none matched it:
   - Windows of 0 or 1 merged edits the corpus asks about, such as two adjacent lines of one paragraph.
   - Windows of 2 or more asked about 9 to 20 cases that merge today, including edits to neighbouring paragraphs. Unless paragraphs added at the same point were handled separately, they also asked about every pair of appends.
   - On long paragraphs a window ignores where the edits are within the paragraph: edits to the first and last lines of an 8-line hard-wrapped paragraph merged under every window tried.
   - The corpus labels were written alongside the paragraph rule, so its full agreement with that rule is expected; the disagreements are the evidence.
-- Merging same-point insertions only when they are identical: asks on the most common two-device edit.
-- Stacking ours first, or by timestamp: ours first reorders text other devices already have; timestamps depend on device clocks.
-- Re-merging from the pre-merge snapshot instead of the file on disk: the user can edit between attempts, and merging from the snapshot would drop those edits.
-- A byte cap alone: a note of very short lines passes 1 MB within budget in bytes but not in memory.
-- UTC in the sibling name, as the TRD's timestamp rule would suggest: reads wrongly to the person who sees the file. Hashing or rejecting long device names: shortening keeps the name readable, and "another device" covers a name with nothing usable left.
+- **Merging same-point insertions only when they are identical**: asks on the most common two-device edit.
+- **Stacking ours first, or by timestamp**: ours first reorders text other devices already have; timestamps depend on device clocks.
+- **Re-merging from the pre-merge snapshot instead of the file on disk**: the user can edit between attempts, and merging from the snapshot would drop those edits.
+- **A byte cap alone**: a note of very short lines passes 1 MB within budget in bytes but not in memory.
+- **UTC in the sibling name**, as the TRD's timestamp rule would suggest: reads wrongly to the person who sees the file.
+- **Hashing or rejecting long device names**: shortening keeps the name readable, and "another device" covers a name with nothing usable left.
